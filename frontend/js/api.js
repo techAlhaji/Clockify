@@ -6,12 +6,21 @@
 const API_BASE = window.location.origin;
 
 const ApiClient = {
+  adminHeaders() {
+    const pin = sessionStorage.getItem("clockify_admin_pin");
+    return pin ? { "X-Admin-Pin": pin } : {};
+  },
+
   async get(endpoint) {
     try {
-      const response = await fetch(`${API_BASE}${endpoint}`);
+      const response = await fetch(`${API_BASE}${endpoint}`, {
+        headers: this.adminHeaders()
+      });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.detail?.message || data.detail || "API request failed");
+        const err = new Error(data.detail?.message || data.detail || "API request failed");
+        err.status = response.status;
+        throw err;
       }
       return data;
     } catch (err) {
@@ -24,12 +33,14 @@ const ApiClient = {
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...this.adminHeaders() },
         body: JSON.stringify(payload)
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.detail?.message || data.detail || "Request failed");
+        const err = new Error(data.detail?.message || data.detail || "Request failed");
+        err.status = response.status;
+        throw err;
       }
       return data;
     } catch (err) {
@@ -42,18 +53,25 @@ const ApiClient = {
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...this.adminHeaders() },
         body: JSON.stringify(payload)
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.detail?.message || data.detail || "Request failed");
+        const err = new Error(data.detail?.message || data.detail || "Request failed");
+        err.status = response.status;
+        throw err;
       }
       return data;
     } catch (err) {
       console.error(`PUT ${endpoint} failed:`, err);
       throw err;
     }
+  },
+
+  // Auth Endpoints
+  verifyPin(employeeId, pin) {
+    return this.post("/api/auth/verify-pin", { employee_id: employeeId, pin });
   },
 
   // Employee Endpoints
@@ -93,6 +111,10 @@ const ApiClient = {
   },
 
   // Admin Endpoints
+  adminLogin(pin) {
+    return this.post("/api/admin/login", { pin });
+  },
+
   getGeofence() {
     return this.get("/api/admin/geofence");
   },

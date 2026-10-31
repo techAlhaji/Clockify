@@ -24,6 +24,11 @@ const elements = {
   modalSwitch: document.getElementById("modalSwitch"),
   modalClose: document.getElementById("modalClose"),
   employeeSelectList: document.getElementById("employeeSelectList"),
+  signinForm: document.getElementById("signinForm"),
+  signinEmployeeId: document.getElementById("signinEmployeeId"),
+  signinPin: document.getElementById("signinPin"),
+  signinError: document.getElementById("signinError"),
+  btnSignin: document.getElementById("btnSignin"),
   
   // Radar / Status
   statusPulse: document.getElementById("statusPulse"),
@@ -56,15 +61,23 @@ async function init() {
     // 2. Fetch Employees List
     AppState.employeesList = await ApiClient.getEmployees();
     
-    // 3. Select Initial Employee (Stored or First)
+    // 3. Restore Session or Require Staff Sign-In
     const storedId = localStorage.getItem("clockify_active_emp_id");
     if (storedId) {
-      AppState.currentEmployee = AppState.employeesList.find(e => e.id === parseInt(storedId)) || AppState.employeesList[0];
-    } else {
-      AppState.currentEmployee = AppState.employeesList[0];
+      AppState.currentEmployee = AppState.employeesList.find(e => e.id === parseInt(storedId));
     }
 
-    renderEmployeeProfile();
+    if (AppState.currentEmployee) {
+      renderEmployeeProfile();
+    } else {
+      elements.employeeName.textContent = "Not Signed In";
+      elements.employeeDept.textContent = "Sign in with your Employee ID and PIN to begin";
+      elements.employeeAvatar.textContent = "--";
+      elements.actionBtnText.textContent = "Sign In to Clock In";
+      elements.btnAction.disabled = true;
+      openSwitchModal();
+    }
+
     renderEmployeeModalList();
     
     // 4. Fetch Shift Status & History
@@ -278,8 +291,11 @@ async function handleClockOut() {
 
 // Event Listeners & Modals
 function setupEventListeners() {
-  elements.btnSwitchEmployee.addEventListener("click", () => {
-    elements.modalSwitch.classList.add("open");
+  elements.btnSwitchEmployee.addEventListener("click", openSwitchModal);
+
+  elements.signinForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    handleSignIn();
   });
 
   elements.modalClose.addEventListener("click", () => {
@@ -293,6 +309,53 @@ function setupEventListeners() {
   });
 }
 
+// Staff Sign-In
+function openSwitchModal() {
+  elements.signinError.classList.add("hidden");
+  elements.modalSwitch.classList.add("open");
+  setTimeout(() => elements.signinEmployeeId.focus(), 80);
+}
+
+function showSigninError(message) {
+  elements.signinError.textContent = message;
+  elements.signinError.classList.remove("hidden");
+}
+
+async function handleSignIn() {
+  const employeeId = parseInt(elements.signinEmployeeId.value, 10);
+  const pin = elements.signinPin.value.trim();
+
+  if (!employeeId || !pin) {
+    showSigninError("Enter your Employee ID and Security PIN.");
+    return;
+  }
+
+  elements.btnSignin.disabled = true;
+  elements.btnSignin.textContent = "Verifying…";
+  elements.signinError.classList.add("hidden");
+
+  try {
+    const res = await ApiClient.verifyPin(employeeId, pin);
+    AppState.currentEmployee = res.employee;
+    localStorage.setItem("clockify_active_emp_id", res.employee.id);
+
+    elements.signinEmployeeId.value = "";
+    elements.signinPin.value = "";
+    elements.modalSwitch.classList.remove("open");
+
+    renderEmployeeProfile();
+    await refreshShiftData();
+    showToast(`Signed in as ${res.employee.name}. Welcome!`, "success");
+  } catch (err) {
+    showSigninError(err.message || "Invalid Employee ID or Security PIN.");
+    elements.signinPin.value = "";
+    elements.signinPin.focus();
+  } finally {
+    elements.btnSignin.disabled = false;
+    elements.btnSignin.textContent = "Sign In";
+  }
+}
+
 function renderEmployeeModalList() {
   elements.employeeSelectList.innerHTML = AppState.employeesList.map(emp => `
     <div class="employee-option-card" data-id="${emp.id}">
@@ -300,19 +363,17 @@ function renderEmployeeModalList() {
         <strong>${emp.name}</strong>
         <div style="font-size:0.75rem; color:var(--text-muted);">${emp.department} (${emp.staff_id})</div>
       </div>
-      <span style="color:var(--primary); font-weight:700;">Select →</span>
+      <span class="option-id">ID ${emp.id}</span>
     </div>
   `).join("");
 
   elements.employeeSelectList.querySelectorAll(".employee-option-card").forEach(card => {
-    card.addEventListener("click", async () => {
+    card.addEventListener("click", () => {
       const id = parseInt(card.getAttribute("data-id"));
-      AppState.currentEmployee = AppState.employeesList.find(e => e.id === id);
-      localStorage.setItem("clockify_active_emp_id", id);
-      renderEmployeeProfile();
-      elements.modalSwitch.classList.remove("open");
-      await refreshShiftData();
-      showToast(`Switched profile to ${AppState.currentEmployee.name}`, "warning");
+      elements.signinEmployeeId.value = id;
+      elements.signinPin.value = "";
+      elements.signinError.classList.add("hidden");
+      elements.signinPin.focus();
     });
   });
 }

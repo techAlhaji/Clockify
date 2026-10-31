@@ -42,6 +42,12 @@ const AdminApp = (() => {
     btnSeedDemo: document.getElementById("btnSeedDemo"),
     attendanceTableBody: document.getElementById("attendanceTableBody"),
 
+    adminGate: document.getElementById("adminGate"),
+    gateForm: document.getElementById("gateForm"),
+    gatePin: document.getElementById("gatePin"),
+    gateError: document.getElementById("gateError"),
+    btnUnlock: document.getElementById("btnUnlock"),
+
     toastContainer: document.getElementById("toastContainer")
   };
 
@@ -49,7 +55,9 @@ const AdminApp = (() => {
     allRecords: [],
     currentGeofence: null,
     viewMonth: new Date(),
-    expandedId: null
+    expandedId: null,
+    locked: true,
+    refreshTimer: null
   };
 
   function escapeHtml(value) {
@@ -89,11 +97,77 @@ const AdminApp = (() => {
     startClock();
     bindEvents();
     renderMonthLabel();
+
+    const storedPin = sessionStorage.getItem("clockify_admin_pin");
+    if (storedPin) {
+      try {
+        await ApiClient.adminLogin(storedPin);
+        await unlockDashboard();
+      } catch {
+        sessionStorage.removeItem("clockify_admin_pin");
+        showGate("Session expired — please unlock again.");
+      }
+    } else {
+      showGate();
+    }
+  }
+
+  // ================= Admin PIN Gate =================
+  function showGate(message) {
+    state.locked = true;
+    els.adminGate.hidden = false;
+    if (message) {
+      els.gateError.textContent = message;
+      els.gateError.classList.remove("hidden");
+    } else {
+      els.gateError.textContent = "";
+      els.gateError.classList.add("hidden");
+    }
+    els.gatePin.value = "";
+    setTimeout(() => els.gatePin.focus(), 60);
+  }
+
+  async function attemptUnlock() {
+    const pin = els.gatePin.value.trim();
+    if (!pin) return;
+
+    els.btnUnlock.disabled = true;
+    els.btnUnlock.textContent = "Verifying…";
+    els.gateError.classList.add("hidden");
+
+    try {
+      await ApiClient.adminLogin(pin);
+      sessionStorage.setItem("clockify_admin_pin", pin);
+      await unlockDashboard();
+    } catch (err) {
+      els.gateError.textContent = err.message || "Incorrect PIN. Access denied.";
+      els.gateError.classList.remove("hidden");
+    } finally {
+      els.btnUnlock.disabled = false;
+      els.btnUnlock.textContent = "Unlock Dashboard";
+    }
+  }
+
+  async function unlockDashboard() {
+    state.locked = false;
+    els.adminGate.hidden = true;
     await Promise.all([loadKpis(), loadGeofence(), loadRecords()]);
-    setInterval(refreshLiveData, REFRESH_INTERVAL_MS);
+    if (!state.refreshTimer) {
+      state.refreshTimer = setInterval(refreshLiveData, REFRESH_INTERVAL_MS);
+    }
+  }
+
+  function handleAuthError(err) {
+    if (err && err.status === 401) {
+      sessionStorage.removeItem("clockify_admin_pin");
+      showGate("Session expired — please unlock again.");
+      return true;
+    }
+    return false;
   }
 
   async function refreshLiveData() {
+    if (state.locked) return;
     await Promise.all([loadKpis({ silent: true }), loadRecords({ silent: true })]);
   }
 
@@ -121,6 +195,7 @@ const AdminApp = (() => {
       countUp(els.kpiLateArrivals, metrics.late_arrivals ?? 0);
       countUp(els.kpiOutsideAttempts, metrics.outside_boundary_attempts ?? 0);
     } catch (err) {
+      if (handleAuthError(err)) return;
       if (!silent) showToast("Failed to load dashboard metrics.", "error");
     }
   }
@@ -186,6 +261,7 @@ const AdminApp = (() => {
       els.btnToggleEdit.textContent = "Edit Geofence";
       showToast("Geofence updated successfully.", "success");
     } catch (err) {
+      if (handleAuthError(err)) return;
       showToast(err.message || "Failed to update geofence.", "error");
     }
   }
@@ -224,6 +300,7 @@ const AdminApp = (() => {
       state.allRecords = await ApiClient.getAdminRecords();
       renderTable();
     } catch (err) {
+      if (handleAuthError(err)) return;
       if (!silent) showToast("Failed to load attendance records.", "error");
       state.allRecords = [];
       renderTable();
@@ -355,7 +432,11 @@ const AdminApp = (() => {
   async function exportCsv() {
     try {
       const url = `${window.location.origin}/api/admin/export/csv`;
-      const response = await fetch(url);
+      const response = await fetch(url, { headers: ApiClient.adminHeaders() });
+      if (response.status === 401) {
+        handleAuthError({ status: 401 });
+        throw new Error("Admin PIN required — please unlock again.");
+      }
       if (!response.ok) throw new Error("CSV export failed on the server.");
 
       const blob = await response.blob();
@@ -384,12 +465,18 @@ const AdminApp = (() => {
       showToast("Sample attendance records generated.", "success");
       await refreshLiveData();
     } catch (err) {
+      if (handleAuthError(err)) return;
       showToast(err.message || "Failed to generate sample data.", "error");
     }
   }
 
   // ================= Events =================
   function bindEvents() {
+    els.gateForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      attemptUnlock();
+    });
+
     els.btnSaveGeofence.addEventListener("click", saveGeofence);
     els.btnUseCurrentLocation.addEventListener("click", useCurrentLocation);
 
