@@ -3,29 +3,51 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Clockify Admin — Attendance Dashboard</title>
-  <meta name="description" content="Admin console for workplace geofence configuration, live attendance monitoring and CSV reporting.">
+  <title>Admin — Clockify Dashboard</title>
+  <meta name="description" content="Clockify admin dashboard — geofence management and live attendance monitoring.">
+  <meta name="theme-color" content="#05080f">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/static/assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/assets/images/logo.jpg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="stylesheet" href="/static/css/admin.css">
 </head>
 <body class="admin-body">
 
-  <!-- Top bar (dashboard) -->
-  <header class="navbar topbar admin-topbar">
-    <div class="topbar-brand">
-      <div class="brand">
-        <div class="brand-icon">C</div>
-        <span>Clockify</span>
-      </div>
+  <!-- NAVBAR -->
+  <header class="navbar" role="banner">
+    <a class="brand" href="/" aria-label="Clockify Home">
+      <img class="brand-logo-img" src="/static/assets/images/logo.jpg" alt="Clockify" width="32" height="32">
+      <span class="brand-wordmark">Clock<em>ify</em></span>
       <span class="brand-tag">Admin</span>
-    </div>
-
-    <nav class="pill-nav" aria-label="Primary">
-      <a href="/admin" class="pill-nav-item is-current">Admin Console</a>
-      <a href="/" class="pill-nav-item" id="navEmployeeLink">Employee Portal</a>
+    </a>
+    <button type="button" class="nav-hamburger" id="navHamburger" aria-label="Toggle Navigation Menu" aria-expanded="false">
+      <span class="hamburger-bar"></span>
+      <span class="hamburger-bar"></span>
+      <span class="hamburger-bar"></span>
+    </button>
+    <nav class="nav-actions" id="navActions">
+      <div id="adminUserBadge" class="admin-badge-pill" style="display:none;">
+        <span class="admin-badge-dot"></span>
+        <span id="adminUsernameDisplay">techAlhaji</span>
+      </div>
+      <button type="button" class="btn-ghost" id="btnAdminLogout" style="display:none; padding: 0.38rem 0.75rem; font-size: 0.78rem;">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+          <polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>
+        </svg>
+        Sign Out
+      </button>
+      <a href="/" class="nav-link" id="navEmployeeLink">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+          <polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/>
+        </svg>
+        Employee Portal
+      </a>
     </nav>
 
     <button type="button" class="nav-hamburger" id="navHamburger" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navActions">
@@ -38,157 +60,222 @@
     </div>
   </header>
 
-  <!-- Admin login gate (split overlay) -->
-  <div class="admin-gate" id="adminLoginGate" style="display:flex;">
-    <section class="gate-hero">
-      <div class="gate-hero-inner">
-        <div class="gate-brand">
-          <div class="brand-icon">C</div>
-          <div class="gate-brand-text">
-            <strong>Clockify</strong>
-            <span>Admin Console</span>
-          </div>
+  <!-- EXCLUSIVE ADMIN LOGIN GATE -->
+  <section id="adminLoginGate" class="auth-gate-wrap" aria-label="Exclusive Admin Login">
+    <div class="auth-gate-card">
+      <div class="auth-security-badge">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+        </svg>
+        RESTRICTED CONSOLE · AUTHORIZED LEAD TECH ONLY
+      </div>
+      <div class="auth-gate-hd">
+        <div class="auth-avatar-shield">🛡️</div>
+        <h2 class="auth-gate-title">Admin Access Gate</h2>
+        <p class="auth-gate-sub">Exclusive administrative access for workforce monitoring, geofence parameter control, and live multi-device attendance records.</p>
+      </div>
+
+      <form id="adminLoginForm" class="auth-gate-form" onsubmit="return false;" novalidate>
+        <div class="f-group">
+          <label class="f-label" for="adminUsername">Admin Username / Staff ID</label>
+          <input type="text" id="adminUsername" class="f-input" placeholder="e.g. techAlhaji or EMP009" required autocomplete="username" autofocus>
         </div>
 
-        <span class="eyebrow gate-eyebrow">ADMIN CONSOLE</span>
-        <h1 class="gate-headline">Monitor attendance in real time.</h1>
-        <p class="gate-lede">Manage the office perimeter, review clock-ins and export records.</p>
+        <div class="f-group">
+          <label class="f-label" for="adminPin">Admin Security PIN</label>
+          <input type="password" id="adminPin" class="f-input" placeholder="Enter PIN (e.g. 1234)" maxlength="8" required autocomplete="current-password">
+        </div>
+
+        <div id="adminLoginError" class="auth-error-msg" style="display:none;"></div>
+
+        <button type="submit" id="btnAdminLoginSubmit" class="btn-primary auth-btn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+          </svg>
+          Unlock Admin Console
+        </button>
+      </form>
+
+      <div class="auth-gate-footer">
+        <span>Are you an employee?</span>
+        <a href="/" class="auth-switch-link">Go to Employee Clock-In Portal &rarr;</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ADMIN MAIN (Protected) -->
+  <main class="admin-wrap" id="adminDashboardContent" role="main" style="display:none;">
+
+    <!-- Page Header -->
+    <div class="page-hd">
+      <div class="page-hd-left">
+        <h1 class="page-hd-title">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/>
+          </svg>
+          Attendance Dashboard
+        </h1>
+        <p class="page-hd-sub">Real-time workforce monitoring and geofence management</p>
+      </div>
+      <div class="page-hd-actions">
+        <div class="live-pill" id="liveSyncPill" title="Live multi-device polling active">
+          <span class="live-dot"></span>
+          <span>Live Sync</span>
+        </div>
+        <div class="date-chip">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          <span id="adminDateDisplay">—</span>
+        </div>
+        <button type="button" class="btn-ghost" id="btnRefreshData" title="Refresh attendance records and KPIs">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          Refresh
+        </button>
+        <button type="button" class="btn-primary" id="btnSeedDemo">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+          </svg>
+          Seed Demo Data
+        </button>
+      </div>
+    </div>
+
+    <!-- KPI CARDS -->
+    <section class="kpi-grid" aria-label="Key performance indicators">
+
+      <div class="kpi kpi-indigo" role="region" aria-label="Total staff">
+        <div class="kpi-icon-box">👥</div>
+        <div class="kpi-label">Total Staff</div>
+        <div class="kpi-val" id="kpiTotalStaff">—</div>
+        <div class="kpi-sub">Registered employees</div>
       </div>
     </section>
 
-    <section class="gate-panel">
-      <div class="auth-gate-card">
-        <div class="gate-badge-row">
-          <span class="gate-shield" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
-          </span>
-          <span class="gate-badge">RESTRICTED CONSOLE</span>
-        </div>
-
-        <h2 class="gate-title">Sign in to continue</h2>
-        <p class="gate-sub">Enter your administrator credentials to open the dashboard.</p>
-
-        <form id="adminLoginForm" class="gate-form" autocomplete="off">
-          <div class="f-group">
-            <label for="adminUsername">Username</label>
-            <input type="text" id="adminUsername" class="form-control" placeholder="e.g. techAlhaji" autocomplete="username" required>
-          </div>
-          <div class="f-group">
-            <label for="adminPin">PIN</label>
-            <input type="password" id="adminPin" class="form-control gate-input" inputmode="numeric" maxlength="8" placeholder="&bull;&bull;&bull;&bull;" autocomplete="off" required>
-          </div>
-          <p class="gate-error hidden" id="adminLoginError" role="alert"></p>
-          <button type="submit" id="btnAdminLoginSubmit" class="btn-primary gate-submit">Sign In</button>
-        </form>
-
-        <p class="gate-note">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-          Authorised administrators only.
-        </p>
+      <div class="kpi kpi-green" role="region" aria-label="Present today">
+        <div class="kpi-icon-box">✅</div>
+        <div class="kpi-label">Present Today</div>
+        <div class="kpi-val" id="kpiPresent">—</div>
+        <div class="kpi-sub">Completed shifts (clocked out)</div>
       </div>
+
+      <div class="kpi kpi-blue" role="region" aria-label="Clocked in now">
+        <div class="kpi-icon-box">🟦</div>
+        <div class="kpi-label">Clocked In Now</div>
+        <div class="kpi-val" id="kpiClockedInNow">—</div>
+        <div class="kpi-sub">Active on-site (pending clock out)</div>
+      </div>
+
+      <div class="kpi kpi-amber" role="region" aria-label="Late arrivals">
+        <div class="kpi-icon-box">⏰</div>
+        <div class="kpi-label">Late Arrivals</div>
+        <div class="kpi-val" id="kpiLate">—</div>
+        <div class="kpi-sub">After shift start time</div>
+      </div>
+
+      <div class="kpi kpi-red" role="region" aria-label="Absent">
+        <div class="kpi-icon-box">🚫</div>
+        <div class="kpi-label">Absent</div>
+        <div class="kpi-val" id="kpiAbsent">—</div>
+        <div class="kpi-sub">Not yet clocked in</div>
+      </div>
+
     </section>
   </div>
 
-  <!-- Dashboard -->
-  <main id="adminDashboardContent" class="admin-wrap" style="display:none;">
+    <!-- GEOFENCE + RULES -->
+    <section class="two-col" aria-label="Configuration">
 
-    <aside class="side-nav admin-sidebar" aria-label="Admin sections">
-      <span class="side-nav-label">OVERVIEW</span>
-      <a href="#overview" class="side-nav-link is-current">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-        Dashboard
-      </a>
-      <a href="#records" class="side-nav-link">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-        Attendance Records
-      </a>
-
-      <span class="side-nav-label">SETTINGS</span>
-      <a href="#geofence" class="side-nav-link">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-        Workplace Geofence
-      </a>
-      <a href="#rules" class="side-nav-link">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        Rules
-      </a>
-
-      <hr class="side-nav-divider">
-      <a href="/" class="side-nav-cta">Open Employee Portal</a>
-    </aside>
-
-    <div class="admin-content">
-
-      <!-- Page header -->
-      <header class="page-hd" id="overview">
-        <div class="page-hd-text">
-          <h1 class="page-title"><span class="page-crumb">Admin /</span> Attendance Dashboard</h1>
-          <p class="page-sub">Live view of staff attendance and the workplace boundary.</p>
+      <!-- Geofence Config -->
+      <div class="a-card">
+        <div class="a-card-hd">
+          <h2 class="a-card-title">
+            <span class="a-card-icon">📍</span>
+            Workplace Geofence
+          </h2>
+          <p class="a-card-sub">Set official GPS coordinates and allowed radius for clock-in verification.</p>
         </div>
-        <div class="page-actions">
-          <span class="sync-pill" id="liveSyncPill">Connecting…</span>
-          <span class="date-chip" id="adminDateDisplay">—</span>
-          <button type="button" class="btn-ghost" id="btnRefreshData">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-            Refresh
+        <form class="geo-form" id="geofenceForm" onsubmit="return false;" novalidate>
+          <div class="f-group">
+            <label class="f-label" for="workplaceName">Workplace / Branch Name</label>
+            <input type="text" id="workplaceName" class="f-input" placeholder="e.g. Headquarters" required autocomplete="organization">
+          </div>
+          <div class="f-row">
+            <div class="f-group">
+              <label class="f-label" for="workplaceLat">Latitude</label>
+              <input type="number" step="any" id="workplaceLat" class="f-input" placeholder="6.5244" required>
+            </div>
+            <div class="f-group">
+              <label class="f-label" for="workplaceLon">Longitude</label>
+              <input type="number" step="any" id="workplaceLon" class="f-input" placeholder="3.3792" required>
+            </div>
+          </div>
+          <div class="f-row">
+            <div class="f-group">
+              <label class="f-label" for="workplaceRadius">Radius (Meters)</label>
+              <input type="number" id="workplaceRadius" class="f-input" value="150" min="10" required>
+            </div>
+            <div class="f-group">
+              <label class="f-label" for="workStartTime">Shift Start Time</label>
+              <input type="time" id="workStartTime" class="f-input" value="09:00" required>
+            </div>
+          </div>
+          <div class="f-actions">
+            <button type="button" class="btn-ghost" id="btnUseCurrentGps" title="Set your current device location as the official perimeter">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/></svg>
+              Use My Location as Perimeter
+            </button>
+            <button type="button" class="btn-primary" id="btnSaveGeofence">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+              Save Geofence
+            </button>
+          </div>
+          <p id="geofenceSaveNote" style="font-size:0.74rem; color:var(--emerald-4); margin-top:0.75rem; display:flex; align-items:center; gap:0.45rem;">
+            <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--emerald-4);"></span>
+            <span id="geofenceSaveText">Perimeter is permanently saved across page reloads.</span>
+          </p>
+        </form>
+      </div>
+
+      <!-- Rules + Seed -->
+      <div class="a-card" style="display:flex;flex-direction:column;justify-content:space-between;">
+        <div>
+          <div class="a-card-hd">
+            <h2 class="a-card-title">
+              <span class="a-card-icon">📋</span>
+              Geofence Rules
+            </h2>
+            <p class="a-card-sub">Automated compliance logic applied to every attendance event.</p>
+          </div>
+          <div class="rules-list">
+            <div class="rule-item">
+              <span class="rule-ic">📍</span>
+              <span>Clock-in is only allowed when the device GPS is within the configured perimeter radius.</span>
+            </div>
+            <div class="rule-item">
+              <span class="rule-ic">⏰</span>
+              <span>Arrivals after the shift start time are automatically flagged as <strong style="color:var(--amber-4)">Late</strong>.</span>
+            </div>
+            <div class="rule-item">
+              <span class="rule-ic">🔒</span>
+              <span>Staff cannot clock in twice in one day without clocking out first.</span>
+            </div>
+            <div class="rule-item">
+              <span class="rule-ic">📡</span>
+              <span>GPS accuracy is recorded alongside every event for audit trail compliance.</span>
+            </div>
+          </div>
+        </div>
+        <div style="margin-top:1.5rem;">
+          <p style="font-size:.68rem;color:var(--t3);font-weight:700;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.65rem;">Testing Tools</p>
+          <button type="button" class="btn-ghost" id="btnSeedDemoCard" style="width:100%;">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            Populate Sample Attendance Data
           </button>
-          <button type="button" class="btn-primary" id="btnSeedDemo">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-            Seed Demo Data
-          </button>
-        </div>
-      </header>
-
-      <!-- Tabs -->
-      <nav class="tabs admin-tabs" aria-hidden="true">
-        <span class="tab is-current">Today</span>
-      </nav>
-
-      <!-- KPI cards -->
-      <section class="kpi-grid" aria-label="Attendance summary">
-        <div class="kpi-card">
-          <div class="kpi-head">
-            <span class="kpi-dot dot-navy" aria-hidden="true"></span>
-            <span class="kpi-label">Total Staff</span>
-          </div>
-          <div class="kpi-val" id="kpiTotalStaff">0</div>
-          <p class="kpi-sub">Registered employees</p>
-        </div>
-
-        <div class="kpi-card">
-          <div class="kpi-head">
-            <span class="kpi-dot dot-green" aria-hidden="true"></span>
-            <span class="kpi-label">Present Today</span>
-          </div>
-          <div class="kpi-val" id="kpiPresent">0</div>
-          <p class="kpi-sub">Clocked in today</p>
-        </div>
-
-        <div class="kpi-card">
-          <div class="kpi-head">
-            <span class="kpi-dot dot-blue" aria-hidden="true"></span>
-            <span class="kpi-label">Clocked In Now</span>
-          </div>
-          <div class="kpi-val" id="kpiClockedInNow">0</div>
-          <p class="kpi-sub">Currently on site</p>
-        </div>
-
-        <div class="kpi-card">
-          <div class="kpi-head">
-            <span class="kpi-dot dot-amber" aria-hidden="true"></span>
-            <span class="kpi-label">Late Arrivals</span>
-          </div>
-          <div class="kpi-val" id="kpiLate">0</div>
-          <p class="kpi-sub">After shift start</p>
-        </div>
-
-        <div class="kpi-card">
-          <div class="kpi-head">
-            <span class="kpi-dot dot-red" aria-hidden="true"></span>
-            <span class="kpi-label">Absent</span>
-          </div>
-          <div class="kpi-val" id="kpiAbsent">0</div>
-          <p class="kpi-sub">No record today</p>
         </div>
       </section>
 
@@ -294,75 +381,79 @@
         </section>
       </div>
 
-      <!-- Attendance records -->
-      <section class="tbl-section" id="records">
-        <div class="tbl-title">
-          <div>
-            <h2>Employee Attendance Records</h2>
-            <p class="tbl-sub" id="recordCount">Loading records…</p>
-          </div>
+    </section>
+
+    <!-- ATTENDANCE TABLE -->
+    <section class="tbl-section" aria-label="Attendance records">
+      <div class="tbl-hd">
+        <div class="tbl-hd-left">
+          <h2>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+            Employee Attendance Records
+          </h2>
+          <p>Real-time GPS-verified clock-in and clock-out events.</p>
+        </div>
+        <div class="tbl-filters">
+          <input type="date" id="filterDate" class="f-filter" aria-label="Filter by date">
+          <input type="search" id="searchEmployee" class="f-filter" placeholder="Search staff or dept…" aria-label="Search">
+          <button type="button" class="btn-primary" id="btnToggleAllDates" title="Toggle between today's live roster and all recorded sessions">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+            <span id="lblToggleAllDates">📜 View All History</span>
+          </button>
+          <button type="button" class="btn-ghost" id="btnApplyFilters">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+            Filter
+          </button>
+          <button type="button" class="btn-primary" id="btnExportCsv">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Export CSV
+          </button>
         </div>
 
-        <div class="tbl-toolbar">
-          <input type="search" id="searchEmployee" class="search-input" placeholder="Search by name..." aria-label="Search by employee name">
-          <input type="date" id="filterDate" class="form-control table-filter" aria-label="Filter by date">
-          <button type="button" class="btn-ghost" id="btnToggleAllDates"><span id="lblToggleAllDates">View All History</span></button>
-          <button type="button" class="btn-primary" id="btnApplyFilters">Apply Filters</button>
-          <button type="button" class="btn-primary" id="btnExportCsv">Export CSV</button>
-        </div>
-
-        <div class="table-card">
-          <div class="tbl-scroll">
-            <table class="attendance-table">
-              <thead>
-                <tr>
-                  <th>Employee</th>
-                  <th>Date</th>
-                  <th>Clock In</th>
-                  <th>Clock Out</th>
-                  <th>Status</th>
-                  <th>Punctuality</th>
-                  <th>Notes</th>
-                </tr>
-              </thead>
-              <tbody id="attendanceTableBody">
-                <tr>
-                  <td colspan="7">
-                    <div class="tbl-empty">
-                      <span class="tbl-empty-ic" aria-hidden="true">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                      </span>
-                      <p class="tbl-empty-msg">No attendance records yet</p>
-                      <p class="tbl-empty-sub">Seed demo data or adjust the filters to see records.</p>
-                      <button type="button" class="btn-primary" id="btnSeedDemoCard">Seed Demo Data</button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </section>
+      <div class="tbl-scroll">
+        <table class="data-tbl" role="grid" aria-label="Attendance table">
+          <thead>
+            <tr>
+              <th scope="col">Employee</th>
+              <th scope="col">Date</th>
+              <th scope="col">Clock In</th>
+              <th scope="col">Clock Out</th>
+              <th scope="col">Status</th>
+              <th scope="col">Punctuality</th>
+              <th scope="col">Notes</th>
+            </tr>
+          </thead>
+          <tbody id="attendanceTableBody">
+            <tr>
+              <td colspan="7">
+                <div class="tbl-empty">
+                  <div class="tbl-empty-ic">📋</div>
+                  <div class="tbl-empty-msg">No records loaded yet</div>
+                  <div class="tbl-empty-sub">Records will appear once the system initialises.</div>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
 
     </div>
   </main>
 
-  <!-- Toast notifications -->
-  <div class="toast-container" id="toastContainer" aria-live="polite"></div>
+  <!-- Toast -->
+  <div class="toast-container" id="toastContainer" role="status" aria-live="polite" aria-atomic="false"></div>
 
-  <!-- JavaScript modules -->
   <script src="/static/js/api.js"></script>
   <script src="/static/js/geo.js"></script>
   <script src="/static/js/admin.js"></script>
   <script>
-    document.addEventListener("DOMContentLoaded", () => {
-      const links = document.querySelectorAll(".side-nav-link");
-      links.forEach((link) => {
-        link.addEventListener("click", () => {
-          links.forEach((l) => l.classList.remove("is-current"));
-          link.classList.add("is-current");
-        });
-      });
+    document.addEventListener('DOMContentLoaded', () => {
+      const el = document.getElementById('adminDateDisplay');
+      if (el) el.textContent = new Date().toLocaleDateString([], { weekday:'short', year:'numeric', month:'short', day:'numeric' });
+      const card = document.getElementById('btnSeedDemoCard');
+      const main = document.getElementById('btnSeedDemo');
+      if (card && main) card.addEventListener('click', () => main.click());
     });
   </script>
 </body>

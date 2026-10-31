@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
+from backend.config import get_now
 from backend.database import get_db
 from backend.models import EmployeeModel
 from backend.schemas import EmployeeCreate
@@ -34,7 +35,7 @@ def create_employee(payload: EmployeeCreate):
     conn = get_db()
     cursor = conn.cursor()
     try:
-        now = datetime.now().isoformat()
+        now = get_now().isoformat()
         cursor.execute("""
             INSERT INTO employees (staff_id, name, email, department, pin, created_at)
             VALUES (?, ?, ?, ?, ?, ?)

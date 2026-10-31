@@ -5,6 +5,17 @@
 
 const API_BASE = window.location.origin;
 
+function getAuthHeaders(customHeaders = {}) {
+  const headers = { ...customHeaders };
+  let adminToken = localStorage.getItem("clockify_admin_token") || sessionStorage.getItem("clockify_admin_token");
+  if (adminToken) {
+    adminToken = adminToken.replace(/^["']|["']$/g, '').trim();
+    headers["x-admin-token"] = adminToken;
+    headers["Authorization"] = `Bearer ${adminToken}`;
+  }
+  return headers;
+}
+
 const ApiClient = {
   adminHeaders() {
     const pin = sessionStorage.getItem("clockify_admin_pin");
@@ -14,7 +25,8 @@ const ApiClient = {
   async get(endpoint) {
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
-        headers: this.adminHeaders()
+        headers: getAuthHeaders(),
+        cache: "no-store"
       });
       const data = await response.json();
       if (!response.ok) {
@@ -33,8 +45,9 @@ const ApiClient = {
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...this.adminHeaders() },
-        body: JSON.stringify(payload)
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+        cache: "no-store"
       });
       const data = await response.json();
       if (!response.ok) {
@@ -53,8 +66,9 @@ const ApiClient = {
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json", ...this.adminHeaders() },
-        body: JSON.stringify(payload)
+        headers: getAuthHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+        cache: "no-store"
       });
       const data = await response.json();
       if (!response.ok) {
@@ -69,7 +83,19 @@ const ApiClient = {
     }
   },
 
-  // Auth Endpoints
+  // Authentication Endpoints
+  employeeLogin(identifier, pin) {
+    return this.post("/api/auth/employee-login", { identifier, pin });
+  },
+
+  adminLogin(username, pin) {
+    return this.post("/api/auth/admin-login", { username, pin });
+  },
+
+  verifyAdmin() {
+    return this.get("/api/auth/verify-admin");
+  },
+
   verifyPin(employeeId, pin) {
     return this.post("/api/auth/verify-pin", { employee_id: employeeId, pin });
   },
@@ -110,6 +136,24 @@ const ApiClient = {
     });
   },
 
+  syncShift(record) {
+    return this.post("/api/attendance/sync-shift", {
+      employee_id: record.employee_id,
+      date: record.date,
+      clock_in_time: record.clock_in_time,
+      clock_in_lat: record.clock_in_lat,
+      clock_in_lon: record.clock_in_lon,
+      clock_in_distance: record.clock_in_distance,
+      clock_out_time: record.clock_out_time,
+      clock_out_lat: record.clock_out_lat,
+      clock_out_lon: record.clock_out_lon,
+      clock_out_distance: record.clock_out_distance,
+      status: record.status,
+      is_late: record.is_late || false,
+      notes: record.notes || "Device sync"
+    });
+  },
+
   // Admin Endpoints
   adminLogin(pin) {
     return this.post("/api/admin/login", { pin });
@@ -128,10 +172,11 @@ const ApiClient = {
     return this.get(`/api/admin/metrics${q}`);
   },
 
-  getAdminRecords(date, employeeId) {
+  getAdminRecords(date, employeeId, view) {
     const params = new URLSearchParams();
     if (date) params.append("date", date);
     if (employeeId) params.append("employee_id", employeeId);
+    if (view) params.append("view", view);
     const q = params.toString() ? `?${params.toString()}` : "";
     return this.get(`/api/admin/records${q}`);
   },
@@ -140,3 +185,10 @@ const ApiClient = {
     return this.post("/api/admin/seed-demo-data", {});
   }
 };
+
+if (typeof window !== "undefined") {
+  window.ApiClient = ApiClient;
+}
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = ApiClient;
+}

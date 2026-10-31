@@ -11,6 +11,7 @@ class EmployeeModel:
             "name": row["name"],
             "email": row["email"],
             "department": row["department"],
+            "is_admin": bool(row["is_admin"]) if "is_admin" in row.keys() else False,
             "created_at": row["created_at"]
         }
 
@@ -19,11 +20,16 @@ class AttendanceModel:
     def to_dict(row) -> Dict[str, Any]:
         if not row:
             return {}
+        emp_name = row["name"] if "name" in row.keys() else (row["employee_name"] if "employee_name" in row.keys() else None)
+        staff_id = row["staff_id"] if "staff_id" in row.keys() else None
+        dept = row["department"] if "department" in row.keys() else None
         return {
             "id": row["id"],
             "employee_id": row["employee_id"],
-            "employee_name": row["name"] if "name" in row.keys() else None,
-            "department": row["department"] if "department" in row.keys() else None,
+            "name": emp_name,
+            "employee_name": emp_name,
+            "staff_id": staff_id,
+            "department": dept,
             "date": row["date"],
             "clock_in_time": row["clock_in_time"],
             "clock_in_lat": row["clock_in_lat"],
