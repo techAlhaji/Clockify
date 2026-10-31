@@ -33,8 +33,8 @@
     </button>
 
     <div class="nav-actions" id="navActions">
-      <span class="user-badge" id="adminUserBadge"><span id="adminUsernameDisplay">Admin</span></span>
-      <button type="button" class="btn-ghost" id="btnAdminLogout">Sign Out</button>
+      <span class="user-badge" id="adminUserBadge" style="display:none;"><span id="adminUsernameDisplay">Admin</span></span>
+      <button type="button" class="btn-ghost" id="btnAdminLogout" style="display:none;">Sign Out</button>
     </div>
   </header>
 
@@ -126,7 +126,7 @@
           <p class="page-sub">Live view of staff attendance and the workplace boundary.</p>
         </div>
         <div class="page-actions">
-          <span class="sync-pill" id="liveSyncPill">Connecting…</span>
+          <span class="sync-pill" id="liveSyncPill">Live Sync</span>
           <span class="date-chip" id="adminDateDisplay">—</span>
           <button type="button" class="btn-ghost" id="btnRefreshData">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
@@ -363,6 +363,27 @@
           link.classList.add("is-current");
         });
       });
+
+      const tbody = document.getElementById("attendanceTableBody");
+      const count = document.getElementById("recordCount");
+      if (tbody && count) {
+        const updateCount = () => {
+          if (tbody.querySelector(".tbl-empty")) {
+            count.textContent = "No records for this view";
+            return;
+          }
+          const rows = tbody.querySelectorAll("tr").length;
+          count.textContent = rows + (rows === 1 ? " entry" : " entries");
+        };
+        new MutationObserver(updateCount).observe(tbody, { childList: true, subtree: true });
+        updateCount();
+      }
+
+      const seedCard = document.getElementById("btnSeedDemoCard");
+      const seedMain = document.getElementById("btnSeedDemo");
+      if (seedCard && seedMain) {
+        seedCard.addEventListener("click", () => seedMain.click());
+      }
     });
   </script>
 </body>

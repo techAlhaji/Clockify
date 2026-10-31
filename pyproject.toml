@@ -1,0 +1,16 @@
+[project]
+name = "clockify"
+version = "0.1.0"
+description = "Digital Geofenced Attendance System"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "pydantic>=2.8.0",
+    "python-dotenv>=1.0.1",
+    "pg8000>=1.31.0",
+]
+
+[tool.vercel]
+entrypoint = "backend.main:app"

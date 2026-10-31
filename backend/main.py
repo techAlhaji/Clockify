@@ -29,6 +29,12 @@ app.add_middleware(
 def on_startup():
     init_db()
 
+# Auto-initialize database on cold module load (essential for serverless runtimes)
+try:
+    init_db()
+except Exception:
+    pass
+
 # Mount API Routers
 app.include_router(auth.router)
 app.include_router(employees.router)
