@@ -4,234 +4,366 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clockify Admin — Attendance Dashboard</title>
-  <meta name="description" content="Executive admin dashboard for workplace geofence configuration, live attendance monitoring and CSV reporting.">
+  <meta name="description" content="Admin console for workplace geofence configuration, live attendance monitoring and CSV reporting.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="stylesheet" href="/static/css/admin.css">
 </head>
 <body class="admin-body">
 
-  <div class="admin-shell">
+  <!-- Top bar (dashboard) -->
+  <header class="navbar topbar admin-topbar">
+    <div class="topbar-brand">
+      <div class="brand">
+        <div class="brand-icon">C</div>
+        <span>Clockify</span>
+      </div>
+      <span class="brand-tag">Admin</span>
+    </div>
 
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-brand">
-        <div class="brand-mark">C</div>
-        <div class="brand-text">
-          <strong>Clockify</strong>
-          <span>Admin Console</span>
+    <nav class="pill-nav" aria-label="Primary">
+      <a href="/admin" class="pill-nav-item is-current">Admin Console</a>
+      <a href="/" class="pill-nav-item" id="navEmployeeLink">Employee Portal</a>
+    </nav>
+
+    <button type="button" class="nav-hamburger" id="navHamburger" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navActions">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+    </button>
+
+    <div class="nav-actions" id="navActions">
+      <span class="user-badge" id="adminUserBadge"><span id="adminUsernameDisplay">Admin</span></span>
+      <button type="button" class="btn-ghost" id="btnAdminLogout">Sign Out</button>
+    </div>
+  </header>
+
+  <!-- Admin login gate (split overlay) -->
+  <div class="admin-gate" id="adminLoginGate" style="display:flex;">
+    <section class="gate-hero">
+      <div class="gate-hero-inner">
+        <div class="gate-brand">
+          <div class="brand-icon">C</div>
+          <div class="gate-brand-text">
+            <strong>Clockify</strong>
+            <span>Admin Console</span>
+          </div>
         </div>
-      </div>
 
-      <nav class="sidebar-nav" aria-label="Admin sections">
-        <a href="#dashboard" class="nav-item active" id="navDashboard">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
-          Dashboard
-        </a>
-        <a href="#attendance" class="nav-item" id="navAttendance">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-          Attendance Log
-        </a>
-        <a href="#geofence" class="nav-item" id="navGeofence">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-          Geofence
-        </a>
-        <a href="#attendance" class="nav-item" id="navExport">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          Export CSV
-        </a>
-      </nav>
-
-      <div class="sidebar-footer">
-        <button type="button" class="btn-ghost" id="btnSeedDemo">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-          Populate Demo Data
-        </button>
-        <p class="sidebar-copy">© 2026 Clockify<br>All rights reserved.</p>
+        <span class="eyebrow gate-eyebrow">ADMIN CONSOLE</span>
+        <h1 class="gate-headline">Monitor attendance in real time.</h1>
+        <p class="gate-lede">Manage the office perimeter, review clock-ins and export records.</p>
       </div>
+    </section>
+
+    <section class="gate-panel">
+      <div class="auth-gate-card">
+        <div class="gate-badge-row">
+          <span class="gate-shield" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="9 12 11 14 15 10"/></svg>
+          </span>
+          <span class="gate-badge">RESTRICTED CONSOLE</span>
+        </div>
+
+        <h2 class="gate-title">Sign in to continue</h2>
+        <p class="gate-sub">Enter your administrator credentials to open the dashboard.</p>
+
+        <form id="adminLoginForm" class="gate-form" autocomplete="off">
+          <div class="f-group">
+            <label for="adminUsername">Username</label>
+            <input type="text" id="adminUsername" class="form-control" placeholder="e.g. techAlhaji" autocomplete="username" required>
+          </div>
+          <div class="f-group">
+            <label for="adminPin">PIN</label>
+            <input type="password" id="adminPin" class="form-control gate-input" inputmode="numeric" maxlength="8" placeholder="&bull;&bull;&bull;&bull;" autocomplete="off" required>
+          </div>
+          <p class="gate-error hidden" id="adminLoginError" role="alert"></p>
+          <button type="submit" id="btnAdminLoginSubmit" class="btn-primary gate-submit">Sign In</button>
+        </form>
+
+        <p class="gate-note">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          Authorised administrators only.
+        </p>
+      </div>
+    </section>
+  </div>
+
+  <!-- Dashboard -->
+  <main id="adminDashboardContent" class="admin-wrap" style="display:none;">
+
+    <aside class="side-nav admin-sidebar" aria-label="Admin sections">
+      <span class="side-nav-label">OVERVIEW</span>
+      <a href="#overview" class="side-nav-link is-current">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
+        Dashboard
+      </a>
+      <a href="#records" class="side-nav-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        Attendance Records
+      </a>
+
+      <span class="side-nav-label">SETTINGS</span>
+      <a href="#geofence" class="side-nav-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        Workplace Geofence
+      </a>
+      <a href="#rules" class="side-nav-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Rules
+      </a>
+
+      <hr class="side-nav-divider">
+      <a href="/" class="side-nav-cta">Open Employee Portal</a>
     </aside>
 
-    <!-- Main column -->
-    <div class="admin-main">
+    <div class="admin-content">
 
-      <!-- Topbar -->
-      <header class="topbar">
-        <div>
-          <h1>Dashboard</h1>
-          <p class="topbar-sub" id="topbarDate">Loading date…</p>
+      <!-- Page header -->
+      <header class="page-hd" id="overview">
+        <div class="page-hd-text">
+          <h1 class="page-title"><span class="page-crumb">Admin /</span> Attendance Dashboard</h1>
+          <p class="page-sub">Live view of staff attendance and the workplace boundary.</p>
         </div>
-        <div class="topbar-right">
-          <span class="clock-chip" id="liveClock">--:--</span>
-          <div class="admin-chip" title="Olajide Peter">OP</div>
+        <div class="page-actions">
+          <span class="sync-pill" id="liveSyncPill">Connecting…</span>
+          <span class="date-chip" id="adminDateDisplay">—</span>
+          <button type="button" class="btn-ghost" id="btnRefreshData">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+            Refresh
+          </button>
+          <button type="button" class="btn-primary" id="btnSeedDemo">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+            Seed Demo Data
+          </button>
         </div>
       </header>
 
-      <main class="admin-content" id="dashboard">
+      <!-- Tabs -->
+      <nav class="tabs admin-tabs" aria-hidden="true">
+        <span class="tab is-current">Today</span>
+      </nav>
 
-        <!-- KPI Stat Tiles -->
-        <section class="stats-row" aria-label="Attendance summary">
-          <div class="stat-tile">
-            <span class="stat-icon indigo">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
-            </span>
-            <div class="stat-body">
-              <span class="stat-value" id="kpiTotalEmployees">0</span>
-              <span class="stat-label">Total Employees</span>
+      <!-- KPI cards -->
+      <section class="kpi-grid" aria-label="Attendance summary">
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-dot dot-navy" aria-hidden="true"></span>
+            <span class="kpi-label">Total Staff</span>
+          </div>
+          <div class="kpi-val" id="kpiTotalStaff">0</div>
+          <p class="kpi-sub">Registered employees</p>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-dot dot-green" aria-hidden="true"></span>
+            <span class="kpi-label">Present Today</span>
+          </div>
+          <div class="kpi-val" id="kpiPresent">0</div>
+          <p class="kpi-sub">Clocked in today</p>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-dot dot-blue" aria-hidden="true"></span>
+            <span class="kpi-label">Clocked In Now</span>
+          </div>
+          <div class="kpi-val" id="kpiClockedInNow">0</div>
+          <p class="kpi-sub">Currently on site</p>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-dot dot-amber" aria-hidden="true"></span>
+            <span class="kpi-label">Late Arrivals</span>
+          </div>
+          <div class="kpi-val" id="kpiLate">0</div>
+          <p class="kpi-sub">After shift start</p>
+        </div>
+
+        <div class="kpi-card">
+          <div class="kpi-head">
+            <span class="kpi-dot dot-red" aria-hidden="true"></span>
+            <span class="kpi-label">Absent</span>
+          </div>
+          <div class="kpi-val" id="kpiAbsent">0</div>
+          <p class="kpi-sub">No record today</p>
+        </div>
+      </section>
+
+      <!-- Geofence + rules -->
+      <div class="two-col">
+        <section class="panel" id="geofence">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">Workplace Geofence</h2>
+              <p class="panel-sub">Define the office perimeter used for clock-in verification.</p>
             </div>
           </div>
 
-          <div class="stat-tile">
-            <span class="stat-icon green">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-            </span>
-            <div class="stat-body">
-              <span class="stat-value" id="kpiClockedInToday">0</span>
-              <span class="stat-label">Clocked In Today</span>
-            </div>
-          </div>
-
-          <div class="stat-tile">
-            <span class="stat-icon red">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-            </span>
-            <div class="stat-body">
-              <span class="stat-value" id="kpiLateArrivals">0</span>
-              <span class="stat-label">Late Arrivals</span>
-            </div>
-          </div>
-
-          <div class="stat-tile">
-            <span class="stat-icon orange">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            </span>
-            <div class="stat-body">
-              <span class="stat-value" id="kpiOutsideAttempts">0</span>
-              <span class="stat-label">Outside Boundary Attempts</span>
-            </div>
-          </div>
-        </section>
-
-        <!-- Workplace card + Attendance table -->
-        <div class="content-grid" id="geofence">
-
-          <!-- Workplace / Geofence card -->
-          <aside class="workplace-card">
-            <div class="workplace-head">
-              <div class="workplace-avatar">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-              </div>
-              <span class="badge-active">Active</span>
+          <form class="geofence-form" id="geofenceForm" onsubmit="return false;">
+            <div class="form-group">
+              <label for="workplaceName">Workplace Name</label>
+              <input type="text" id="workplaceName" class="form-control" value="Headquarters - Main Campus" required>
             </div>
 
-            <h2 class="workplace-name" id="geoName">—</h2>
-            <p class="workplace-role">Verified Workplace Boundary</p>
-
-            <button type="button" class="btn-soft" id="btnToggleEdit">Edit Geofence</button>
-
-            <ul class="workplace-meta">
-              <li>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-                <span id="geoCoords">—, —</span>
-              </li>
-              <li>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
-                <span id="geoRadius">— m radius</span>
-              </li>
-              <li>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                <span id="geoUpdated">Updated —</span>
-              </li>
-            </ul>
-
-            <form class="geofence-form hidden" id="geofenceForm" onsubmit="return false;">
+            <div class="form-row">
               <div class="form-group">
-                <label for="workplaceName">Workplace Name</label>
-                <input type="text" id="workplaceName" class="form-control" value="Pier Place" required>
+                <label for="workplaceLat">Latitude</label>
+                <input type="number" step="any" id="workplaceLat" class="form-control" value="6.5244" min="-90" max="90" required>
               </div>
-
-              <div class="form-row">
-                <div class="form-group">
-                  <label for="workplaceLat">Latitude</label>
-                  <input type="number" step="any" id="workplaceLat" class="form-control" value="6.50928" min="-90" max="90" required>
-                </div>
-                <div class="form-group">
-                  <label for="workplaceLon">Longitude</label>
-                  <input type="number" step="any" id="workplaceLon" class="form-control" value="3.374761" min="-180" max="180" required>
-                </div>
+              <div class="form-group">
+                <label for="workplaceLon">Longitude</label>
+                <input type="number" step="any" id="workplaceLon" class="form-control" value="3.3792" min="-180" max="180" required>
               </div>
+            </div>
 
+            <div class="form-row">
               <div class="form-group">
                 <label for="workplaceRadius">Radius (meters)</label>
-                <input type="number" id="workplaceRadius" class="form-control" value="50" min="10" step="1" required>
+                <input type="number" id="workplaceRadius" class="form-control" value="150" min="10" step="1" required>
               </div>
-
-              <div class="form-actions">
-                <button type="button" class="btn-soft" id="btnUseCurrentLocation">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="22" y1="12" x2="18" y2="12"/><line x1="6" y1="12" x2="2" y2="12"/><line x1="12" y1="6" x2="12" y2="2"/><line x1="12" y1="22" x2="12" y2="18"/></svg>
-                  Use My Location
-                </button>
-                <button type="button" class="btn-primary" id="btnSaveGeofence">Save Changes</button>
+              <div class="form-group">
+                <label for="workStartTime">Work Start Time</label>
+                <input type="time" id="workStartTime" class="form-control" value="09:00" required>
               </div>
-            </form>
-          </aside>
+            </div>
 
-          <!-- Attendance table -->
-          <section class="table-card" id="attendance">
-            <div class="table-toolbar">
+            <div class="form-actions">
+              <button type="button" class="btn-ghost" id="btnUseCurrentGps">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>
+                Use My Location
+              </button>
+              <button type="button" class="btn-primary" id="btnSaveGeofence">Save Geofence</button>
+            </div>
+
+            <p class="geofence-note" id="geofenceSaveNote">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+              <span id="geofenceSaveText">Changes apply to every staff device immediately.</span>
+            </p>
+          </form>
+        </section>
+
+        <section class="panel" id="rules">
+          <div class="panel-head">
+            <div>
+              <h2 class="panel-title">Attendance Rules</h2>
+              <p class="panel-sub">How Clockify evaluates each clock-in and clock-out.</p>
+            </div>
+          </div>
+
+          <ul class="rules-list">
+            <li>
+              <span class="rule-ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+              </span>
               <div>
-                <h3>Attendance Log</h3>
-                <p class="table-sub" id="recordCount">Loading records…</p>
+                <p class="rule-title">Geofence required</p>
+                <p class="rule-text">Clock-in is only accepted inside the saved workplace radius.</p>
               </div>
-              <div class="table-tools">
-                <div class="search-wrap">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  <input type="search" id="searchEmployee" class="search-input" placeholder="Search by name..." aria-label="Search by employee name">
-                </div>
-                <button type="button" class="btn-primary" id="btnExportCsv">Export CSV</button>
+            </li>
+            <li>
+              <span class="rule-ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              </span>
+              <div>
+                <p class="rule-title">Late detection</p>
+                <p class="rule-text">Clock-ins after the shift start time are flagged as late.</p>
               </div>
-            </div>
+            </li>
+            <li>
+              <span class="rule-ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-9 4 18 3-9h6"/></svg>
+              </span>
+              <div>
+                <p class="rule-title">Distance logging</p>
+                <p class="rule-text">Every attempt records the distance from the boundary.</p>
+              </div>
+            </li>
+            <li>
+              <span class="rule-ic" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              </span>
+              <div>
+                <p class="rule-title">Export ready</p>
+                <p class="rule-text">Filter, search and export attendance records to CSV.</p>
+              </div>
+            </li>
+          </ul>
+        </section>
+      </div>
 
-            <div class="month-nav">
-              <button type="button" class="month-btn" id="btnPrevMonth" aria-label="Previous month">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-              </button>
-              <span class="month-label" id="monthLabel">—</span>
-              <button type="button" class="month-btn" id="btnNextMonth" aria-label="Next month">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-              </button>
-              <button type="button" class="btn-soft btn-small" id="btnToday">Today</button>
-            </div>
-
-            <div class="table-responsive">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Employee</th>
-                    <th>Date</th>
-                    <th>Clock In</th>
-                    <th>Clock Out</th>
-                    <th>Working Hrs</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody id="attendanceTableBody">
-                  <tr>
-                    <td colspan="6" class="table-empty">Loading attendance records…</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </section>
-
+      <!-- Attendance records -->
+      <section class="tbl-section" id="records">
+        <div class="tbl-title">
+          <div>
+            <h2>Employee Attendance Records</h2>
+            <p class="tbl-sub" id="recordCount">Loading records…</p>
+          </div>
         </div>
-      </main>
-    </div>
-  </div>
 
-  <!-- Toast Notification Container -->
+        <div class="tbl-toolbar">
+          <input type="search" id="searchEmployee" class="search-input" placeholder="Search by name..." aria-label="Search by employee name">
+          <input type="date" id="filterDate" class="form-control table-filter" aria-label="Filter by date">
+          <button type="button" class="btn-ghost" id="btnToggleAllDates"><span id="lblToggleAllDates">View All History</span></button>
+          <button type="button" class="btn-primary" id="btnApplyFilters">Apply Filters</button>
+          <button type="button" class="btn-primary" id="btnExportCsv">Export CSV</button>
+        </div>
+
+        <div class="table-card">
+          <div class="tbl-scroll">
+            <table class="attendance-table">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Date</th>
+                  <th>Clock In</th>
+                  <th>Clock Out</th>
+                  <th>Status</th>
+                  <th>Punctuality</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody id="attendanceTableBody">
+                <tr>
+                  <td colspan="7">
+                    <div class="tbl-empty">
+                      <span class="tbl-empty-ic" aria-hidden="true">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                      </span>
+                      <p class="tbl-empty-msg">No attendance records yet</p>
+                      <p class="tbl-empty-sub">Seed demo data or adjust the filters to see records.</p>
+                      <button type="button" class="btn-primary" id="btnSeedDemoCard">Seed Demo Data</button>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+
+  <!-- Toast notifications -->
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
-  <!-- JavaScript Modules -->
+  <!-- JavaScript modules -->
   <script src="/static/js/api.js"></script>
+  <script src="/static/js/geo.js"></script>
   <script src="/static/js/admin.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const links = document.querySelectorAll(".side-nav-link");
+      links.forEach((link) => {
+        link.addEventListener("click", () => {
+          links.forEach((l) => l.classList.remove("is-current"));
+          link.classList.add("is-current");
+        });
+      });
+    });
+  </script>
 </body>
 </html>
