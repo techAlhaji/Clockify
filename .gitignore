@@ -1,18 +1,24 @@
-# Byte-compiled files
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
 
-# Database
+# Local databases (auto-created and seeded by backend.database.init_db)
 *.db
 *.sqlite3
 
-# Environment & Virtual Environments
+# Environment / secrets
 .env
-.venv/
-venv/
-ENV/
 
-# IDE & Editor settings
+# IDE & editor settings
 .vscode/
 .idea/
+
+# OS files
+.DS_Store
+Thumbs.db
