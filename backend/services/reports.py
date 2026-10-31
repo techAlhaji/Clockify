@@ -25,13 +25,16 @@ def generate_daily_report(date_str: str = None) -> dict:
         WHERE a.date = ?
     """, (date_str,))
     records = cursor.fetchall()
-    conn.close()
 
     total_present = len(records)
     clocked_in_now = sum(1 for r in records if r["status"] == "CLOCKED_IN")
     clocked_out = sum(1 for r in records if r["status"] == "CLOCKED_OUT")
     late_arrivals = sum(1 for r in records if r["is_late"] == 1)
     absent = max(0, total_employees - total_present)
+
+    cursor.execute("SELECT COUNT(*) FROM boundary_attempts WHERE date = ?", (date_str,))
+    outside_boundary_attempts = cursor.fetchone()[0]
+    conn.close()
 
     return {
         "date": date_str,
@@ -40,6 +43,7 @@ def generate_daily_report(date_str: str = None) -> dict:
         "clocked_in_now": clocked_in_now,
         "clocked_out": clocked_out,
         "late_arrivals": late_arrivals,
+        "outside_boundary_attempts": outside_boundary_attempts,
         "absent": absent
     }
 

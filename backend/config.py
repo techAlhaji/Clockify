@@ -17,3 +17,6 @@ DEFAULT_WORKPLACE = {
 
 # Geolocation Accuracy Threshold
 MAX_ALLOWED_GPS_ACCURACY_METERS = 80.0
+
+# Admin Dashboard Security (override via CLOCKIFY_ADMIN_PIN env var)
+ADMIN_PIN = os.getenv("CLOCKIFY_ADMIN_PIN", "1234")

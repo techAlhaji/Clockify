@@ -41,6 +41,22 @@ def clock_in(payload: ClockInRequest):
     )
 
     if not geo_check["is_inside"]:
+        now = datetime.now()
+        cursor.execute("""
+            INSERT INTO boundary_attempts (
+                employee_id, date, attempted_at, latitude, longitude,
+                distance_meters, allowed_radius_meters
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            payload.employee_id,
+            now.strftime("%Y-%m-%d"),
+            now.isoformat(),
+            payload.latitude,
+            payload.longitude,
+            geo_check["distance_meters"],
+            geo_check["allowed_radius_meters"]
+        ))
+        conn.commit()
         conn.close()
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

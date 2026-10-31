@@ -58,9 +58,22 @@ def init_db():
         )
     """)
 
-    conn.commit()
+    # 4. Rejected Boundary Attempts Table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS boundary_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            attempted_at TEXT NOT NULL,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            distance_meters REAL NOT NULL,
+            allowed_radius_meters REAL NOT NULL,
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        )
+    """)
 
-    # Seed Default Geofence if table is empty
+    conn.commit()
     cursor.execute("SELECT COUNT(*) FROM geofence_settings")
     if cursor.fetchone()[0] == 0:
         now = datetime.now().isoformat()

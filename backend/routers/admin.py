@@ -1,16 +1,29 @@
-from fastapi import APIRouter, HTTPException, Response, Query
+from fastapi import APIRouter, HTTPException, Response, Query, Header, Depends
 from datetime import datetime, timedelta
 from typing import Optional
+from backend.config import ADMIN_PIN
 from backend.database import get_db
 from backend.models import GeofenceModel, AttendanceModel
-from backend.schemas import GeofenceUpdate
+from backend.schemas import GeofenceUpdate, AdminLogin
 from backend.services.reports import generate_daily_report, export_attendance_csv
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 
+def require_admin_pin(x_admin_pin: Optional[str] = Header(default=None)):
+    """Gate sensitive admin routes behind the X-Admin-Pin header"""
+    if x_admin_pin != ADMIN_PIN:
+        raise HTTPException(status_code=401, detail="Invalid or missing admin PIN")
+
+@router.post("/login")
+def admin_login(payload: AdminLogin):
+    """Verify admin PIN before unlocking the dashboard"""
+    if payload.pin != ADMIN_PIN:
+        raise HTTPException(status_code=401, detail="Incorrect PIN. Access denied.")
+    return {"status": "success", "message": "Admin session verified"}
+
 @router.get("/geofence")
 def get_geofence():
-    """Retrieve current active workplace geofence coordinates and radius"""
+    """Retrieve current active workplace geofence coordinates and radius (open: employee portal consumes this)"""
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM geofence_settings ORDER BY id DESC LIMIT 1")
@@ -22,7 +35,7 @@ def get_geofence():
 
     return GeofenceModel.to_dict(row)
 
-@router.put("/geofence")
+@router.put("/geofence", dependencies=[Depends(require_admin_pin)])
 def update_geofence(payload: GeofenceUpdate):
     """Update active workplace coordinates and allowed radius"""
     conn = get_db()
@@ -58,12 +71,12 @@ def update_geofence(payload: GeofenceUpdate):
         "geofence": GeofenceModel.to_dict(row)
     }
 
-@router.get("/metrics")
+@router.get("/metrics", dependencies=[Depends(require_admin_pin)])
 def get_admin_metrics(date: Optional[str] = None):
     """Retrieve daily summary KPIs for admin dashboard"""
     return generate_daily_report(date)
 
-@router.get("/records")
+@router.get("/records", dependencies=[Depends(require_admin_pin)])
 def get_attendance_records(date: Optional[str] = None, employee_id: Optional[int] = None):
     """Retrieve all attendance records with optional date or employee filters"""
     conn = get_db()
@@ -93,7 +106,7 @@ def get_attendance_records(date: Optional[str] = None, employee_id: Optional[int
 
     return [AttendanceModel.to_dict(row) for row in rows]
 
-@router.get("/export/csv")
+@router.get("/export/csv", dependencies=[Depends(require_admin_pin)])
 def download_attendance_csv(date: Optional[str] = None):
     """Download attendance log formatted as CSV"""
     csv_content = export_attendance_csv(date)
@@ -105,7 +118,7 @@ def download_attendance_csv(date: Optional[str] = None):
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
 
-@router.post("/seed-demo-data")
+@router.post("/seed-demo-data", dependencies=[Depends(require_admin_pin)])
 def seed_demo_data():
     """Populates realistic sample attendance records across team members for demonstration"""
     conn = get_db()
@@ -139,6 +152,22 @@ def seed_demo_data():
                 clock_out_distance, status, is_late, notes
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, rec)
+
+    now_iso = datetime.now().isoformat()
+    demo_attempts = [
+        (employees[5][0] if len(employees) > 5 else employees[0][0], today_str, now_iso,
+         lat + 0.01, lon - 0.008, 1250.0, 150.0),
+        (employees[4][0] if len(employees) > 4 else employees[0][0], today_str, now_iso,
+         lat - 0.006, lon + 0.007, 930.0, 150.0),
+    ]
+
+    for attempt in demo_attempts:
+        cursor.execute("""
+            INSERT INTO boundary_attempts (
+                employee_id, date, attempted_at, latitude, longitude,
+                distance_meters, allowed_radius_meters
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, attempt)
 
     conn.commit()
     conn.close()

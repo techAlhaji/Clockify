@@ -41,3 +41,7 @@ class EmployeeCreate(BaseModel):
 class PinVerification(BaseModel):
     employee_id: int
     pin: str
+
+# Admin Login
+class AdminLogin(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=8, description="Admin security PIN")
