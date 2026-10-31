@@ -3,7 +3,6 @@ Clockify — Digital Geofenced Attendance System
 Unified Runner Script
 """
 import sys
-
 import uvicorn
 from backend.database import init_db
 
