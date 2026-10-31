@@ -355,6 +355,22 @@ def seed_demo_data():
             cfg[3], cfg[4], cfg[5], cfg[6], cfg[7], cfg[8], cfg[9], cfg[10]
         ))
 
+    now_iso = datetime.now().isoformat()
+    demo_attempts = [
+        (employees[5][0] if len(employees) > 5 else employees[0][0], today_str, now_iso,
+         lat + 0.01, lon - 0.008, 1250.0, 150.0),
+        (employees[4][0] if len(employees) > 4 else employees[0][0], today_str, now_iso,
+         lat - 0.006, lon + 0.007, 930.0, 150.0),
+    ]
+
+    for attempt in demo_attempts:
+        cursor.execute("""
+            INSERT INTO boundary_attempts (
+                employee_id, date, attempted_at, latitude, longitude,
+                distance_meters, allowed_radius_meters
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, attempt)
+
     conn.commit()
     conn.close()
 

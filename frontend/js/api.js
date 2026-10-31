@@ -17,6 +17,11 @@ function getAuthHeaders(customHeaders = {}) {
 }
 
 const ApiClient = {
+  adminHeaders() {
+    const pin = sessionStorage.getItem("clockify_admin_pin");
+    return pin ? { "X-Admin-Pin": pin } : {};
+  },
+
   async get(endpoint) {
     try {
       const response = await fetch(`${API_BASE}${endpoint}`, {
@@ -25,7 +30,9 @@ const ApiClient = {
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.detail?.message || data.detail || "API request failed");
+        const err = new Error(data.detail?.message || data.detail || "API request failed");
+        err.status = response.status;
+        throw err;
       }
       return data;
     } catch (err) {
@@ -44,7 +51,9 @@ const ApiClient = {
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.detail?.message || data.detail || "Request failed");
+        const err = new Error(data.detail?.message || data.detail || "Request failed");
+        err.status = response.status;
+        throw err;
       }
       return data;
     } catch (err) {
@@ -63,7 +72,9 @@ const ApiClient = {
       });
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.detail?.message || data.detail || "Request failed");
+        const err = new Error(data.detail?.message || data.detail || "Request failed");
+        err.status = response.status;
+        throw err;
       }
       return data;
     } catch (err) {
@@ -144,6 +155,10 @@ const ApiClient = {
   },
 
   // Admin Endpoints
+  adminLogin(pin) {
+    return this.post("/api/admin/login", { pin });
+  },
+
   getGeofence() {
     return this.get("/api/admin/geofence");
   },

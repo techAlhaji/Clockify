@@ -278,7 +278,6 @@ def generate_daily_report(date_str: Optional[str] = None) -> Dict[str, Any]:
         WHERE a.date = ?
     """, (date_str,))
     records = cursor.fetchall()
-    conn.close()
 
     # An employee is only marked PRESENT once they have completed their shift (CLOCKED_OUT).
     # Active on-site arrivals are counted under clocked_in_now.
@@ -288,6 +287,10 @@ def generate_daily_report(date_str: Optional[str] = None) -> Dict[str, Any]:
     late_arrivals = sum(1 for r in records if r["is_late"] == 1)
     absent = max(0, total_employees - (total_present + clocked_in_now))
 
+    cursor.execute("SELECT COUNT(*) FROM boundary_attempts WHERE date = ?", (date_str,))
+    outside_boundary_attempts = cursor.fetchone()[0]
+    conn.close()
+
     return {
         "date": date_str,
         "total_employees": total_employees,
@@ -295,6 +298,7 @@ def generate_daily_report(date_str: Optional[str] = None) -> Dict[str, Any]:
         "clocked_in_now": clocked_in_now,
         "clocked_out": clocked_out,
         "late_arrivals": late_arrivals,
+        "outside_boundary_attempts": outside_boundary_attempts,
         "absent": absent
     }
 
