@@ -49,15 +49,6 @@
         Employee Portal
       </a>
     </nav>
-
-    <button type="button" class="nav-hamburger" id="navHamburger" aria-label="Toggle navigation" aria-expanded="false" aria-controls="navActions">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-    </button>
-
-    <div class="nav-actions" id="navActions">
-      <span class="user-badge" id="adminUserBadge"><span id="adminUsernameDisplay">Admin</span></span>
-      <button type="button" class="btn-ghost" id="btnAdminLogout">Sign Out</button>
-    </div>
   </header>
 
   <!-- EXCLUSIVE ADMIN LOGIN GATE -->
@@ -154,7 +145,6 @@
         <div class="kpi-val" id="kpiTotalStaff">—</div>
         <div class="kpi-sub">Registered employees</div>
       </div>
-    </section>
 
       <div class="kpi kpi-green" role="region" aria-label="Present today">
         <div class="kpi-icon-box">✅</div>
@@ -185,7 +175,6 @@
       </div>
 
     </section>
-  </div>
 
     <!-- GEOFENCE + RULES -->
     <section class="two-col" aria-label="Configuration">
@@ -277,108 +266,6 @@
             Populate Sample Attendance Data
           </button>
         </div>
-      </section>
-
-      <!-- Geofence + rules -->
-      <div class="two-col">
-        <section class="panel" id="geofence">
-          <div class="panel-head">
-            <div>
-              <h2 class="panel-title">Workplace Geofence</h2>
-              <p class="panel-sub">Define the office perimeter used for clock-in verification.</p>
-            </div>
-          </div>
-
-          <form class="geofence-form" id="geofenceForm" onsubmit="return false;">
-            <div class="form-group">
-              <label for="workplaceName">Workplace Name</label>
-              <input type="text" id="workplaceName" class="form-control" value="Headquarters - Main Campus" required>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="workplaceLat">Latitude</label>
-                <input type="number" step="any" id="workplaceLat" class="form-control" value="6.5244" min="-90" max="90" required>
-              </div>
-              <div class="form-group">
-                <label for="workplaceLon">Longitude</label>
-                <input type="number" step="any" id="workplaceLon" class="form-control" value="3.3792" min="-180" max="180" required>
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="workplaceRadius">Radius (meters)</label>
-                <input type="number" id="workplaceRadius" class="form-control" value="150" min="10" step="1" required>
-              </div>
-              <div class="form-group">
-                <label for="workStartTime">Work Start Time</label>
-                <input type="time" id="workStartTime" class="form-control" value="09:00" required>
-              </div>
-            </div>
-
-            <div class="form-actions">
-              <button type="button" class="btn-ghost" id="btnUseCurrentGps">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="8"/></svg>
-                Use My Location
-              </button>
-              <button type="button" class="btn-primary" id="btnSaveGeofence">Save Geofence</button>
-            </div>
-
-            <p class="geofence-note" id="geofenceSaveNote">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-              <span id="geofenceSaveText">Changes apply to every staff device immediately.</span>
-            </p>
-          </form>
-        </section>
-
-        <section class="panel" id="rules">
-          <div class="panel-head">
-            <div>
-              <h2 class="panel-title">Attendance Rules</h2>
-              <p class="panel-sub">How Clockify evaluates each clock-in and clock-out.</p>
-            </div>
-          </div>
-
-          <ul class="rules-list">
-            <li>
-              <span class="rule-ic" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
-              </span>
-              <div>
-                <p class="rule-title">Geofence required</p>
-                <p class="rule-text">Clock-in is only accepted inside the saved workplace radius.</p>
-              </div>
-            </li>
-            <li>
-              <span class="rule-ic" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              </span>
-              <div>
-                <p class="rule-title">Late detection</p>
-                <p class="rule-text">Clock-ins after the shift start time are flagged as late.</p>
-              </div>
-            </li>
-            <li>
-              <span class="rule-ic" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12h4l3-9 4 18 3-9h6"/></svg>
-              </span>
-              <div>
-                <p class="rule-title">Distance logging</p>
-                <p class="rule-text">Every attempt records the distance from the boundary.</p>
-              </div>
-            </li>
-            <li>
-              <span class="rule-ic" aria-hidden="true">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-              </span>
-              <div>
-                <p class="rule-title">Export ready</p>
-                <p class="rule-text">Filter, search and export attendance records to CSV.</p>
-              </div>
-            </li>
-          </ul>
-        </section>
       </div>
 
     </section>
@@ -409,6 +296,7 @@
             Export CSV
           </button>
         </div>
+      </div>
 
       <div class="tbl-scroll">
         <table class="data-tbl" role="grid" aria-label="Attendance table">
@@ -438,7 +326,6 @@
       </div>
     </section>
 
-    </div>
   </main>
 
   <!-- Toast -->
