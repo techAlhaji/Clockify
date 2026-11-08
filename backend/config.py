@@ -39,12 +39,12 @@ DEFAULT_WORKPLACE = {
 }
 
 # Admin Security & Access Control
+# No shared secrets or default credentials live in source: session signing key comes
+# from CLOCKIFY_SECRET_KEY (see backend/security.py) and admin PINs are hashed.
 ADMIN_CONFIG = {
     "lead_tech_name": "techAlhaji",
-    "lead_tech_email": "techalhaji@clockify.dev",
-    "default_admin_pin": "1234",
-    "admin_secret_token": "clockify_admin_secure_techAlhaji_token_2026"
+    "lead_tech_email": "techalhaji@clockify.dev"
 }
 
-# Geolocation Accuracy Threshold
-MAX_ALLOWED_GPS_ACCURACY_METERS = 80.0
+# Geolocation Accuracy Threshold: fixes worse than this are rejected.
+MAX_ALLOWED_GPS_ACCURACY_METERS = float(os.environ.get("MAX_GPS_ACCURACY_METERS", "80"))

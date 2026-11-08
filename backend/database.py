@@ -11,6 +11,7 @@ import urllib.parse
 from dotenv import load_dotenv
 
 from backend.config import DB_PATH, DEFAULT_WORKPLACE, get_now
+from backend.security import hash_pin, is_pin_hash
 
 load_dotenv()  # read settings from a .env file, if there is one
 
@@ -161,7 +162,7 @@ def _create_tables(cursor):
             name TEXT NOT NULL,
             email TEXT UNIQUE NOT NULL,
             department TEXT NOT NULL,
-            pin TEXT DEFAULT '1234',
+            pin TEXT NOT NULL,
             is_admin INTEGER DEFAULT 0,
             created_at TEXT NOT NULL
         )""")
@@ -215,8 +216,15 @@ def _seed(cursor):
     # 2. Staff: fill an empty table, or repair an older database
     cursor.execute("SELECT COUNT(*) FROM employees")
     if cursor.fetchone()[0] == 0:
-        for staff in SEED_STAFF:
-            cursor.execute(INSERT_EMPLOYEE, staff + (now,))
+        # Demo password for the starter roster. Override with CLOCKIFY_SEED_PIN in any real
+        # deployment; PINs are hashed per employee (unique salt) before they are stored.
+        import os as _os
+        seed_pin = _os.environ.get("CLOCKIFY_SEED_PIN", "1234")
+        for staff_id, name, email, department, _pin, is_admin in SEED_STAFF:
+            cursor.execute(
+                INSERT_EMPLOYEE,
+                (staff_id, name, email, department, hash_pin(seed_pin), is_admin, now),
+            )
     else:
         # Make sure the lead tech account is named correctly and has admin rights
         cursor.execute("""UPDATE employees
@@ -233,6 +241,18 @@ def _seed(cursor):
 # The two functions the rest of the app uses
 # ---------------------------------------------------------------------------
 
+def _migrate_pin_hashes(cursor):
+    """Hash any legacy plaintext PIN still present in an existing database. Idempotent."""
+    cursor.execute("SELECT id, pin FROM employees")
+    for row in cursor.fetchall():
+        if not is_pin_hash(row["pin"]):
+            legacy_pin = row["pin"] or "1234"
+            cursor.execute(
+                "UPDATE employees SET pin = ? WHERE id = ?",
+                (hash_pin(str(legacy_pin)), row["id"]),
+            )
+
+
 def init_db():
     """Create tables and starter data. Safe to run many times."""
     global _db_initialized
@@ -240,6 +260,7 @@ def init_db():
     cursor = conn.cursor()
     _create_tables(cursor)
     _seed(cursor)
+    _migrate_pin_hashes(cursor)
     conn.commit()
     conn.close()
     _db_initialized = True
