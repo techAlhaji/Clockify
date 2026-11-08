@@ -1,75 +1,109 @@
 /**
  * Clockify — Centralized API Client (api.js)
- * Clean async fetch handlers and error abstraction
+ * Clean async fetch handlers and error abstraction.
+ *
+ * Sessions are held in sessionStorage only (cleared when the tab closes) and
+ * travel exclusively in the Authorization header — never in a URL, never in
+ * localStorage.
  */
 
 const API_BASE = window.location.origin;
 
+const ADMIN_TOKEN_KEY = "clockify_admin_token";
+const EMPLOYEE_TOKEN_KEY = "clockify_employee_token";
+
+function readSessionToken(key) {
+  try {
+    const raw = sessionStorage.getItem(key);
+    return raw ? raw.replace(/^["']|["']$/g, "").trim() : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 function getAuthHeaders(customHeaders = {}) {
   const headers = { ...customHeaders };
-  let adminToken = localStorage.getItem("clockify_admin_token") || sessionStorage.getItem("clockify_admin_token");
-  if (adminToken) {
-    adminToken = adminToken.replace(/^["']|["']$/g, '').trim();
-    headers["x-admin-token"] = adminToken;
-    headers["Authorization"] = `Bearer ${adminToken}`;
+  const token = readSessionToken(ADMIN_TOKEN_KEY) || readSessionToken(EMPLOYEE_TOKEN_KEY);
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
   }
   return headers;
 }
 
+function extractErrorMessage(data, fallback) {
+  const detail = data && data.detail;
+  if (!detail) return fallback;
+  if (typeof detail === "string") return detail;
+  if (typeof detail === "object") return detail.message || detail.error || fallback;
+  return fallback;
+}
+
+// Escape untrusted text before it is interpolated into innerHTML.
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, ch => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[ch]));
+}
+
 const ApiClient = {
+  // --- Session helpers (sessionStorage, per tab) ---
+  setAdminToken(token) {
+    sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
+  },
+  clearAdminToken() {
+    sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  },
+  hasAdminToken() {
+    return Boolean(readSessionToken(ADMIN_TOKEN_KEY));
+  },
+  setEmployeeToken(token) {
+    sessionStorage.setItem(EMPLOYEE_TOKEN_KEY, token);
+  },
+  clearEmployeeToken() {
+    sessionStorage.removeItem(EMPLOYEE_TOKEN_KEY);
+  },
+  hasEmployeeToken() {
+    return Boolean(readSessionToken(EMPLOYEE_TOKEN_KEY));
+  },
+
   async get(endpoint) {
-    try {
-      const response = await fetch(`${API_BASE}${endpoint}`, {
-        headers: getAuthHeaders(),
-        cache: "no-store"
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail?.message || data.detail || "API request failed");
-      }
-      return data;
-    } catch (err) {
-      console.error(`GET ${endpoint} failed:`, err);
-      throw err;
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      headers: getAuthHeaders(),
+      cache: "no-store"
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(extractErrorMessage(data, "API request failed"));
     }
+    return data;
   },
 
   async post(endpoint, payload) {
-    try {
-      const response = await fetch(`${API_BASE}${endpoint}`, {
-        method: "POST",
-        headers: getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(payload),
-        cache: "no-store"
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail?.message || data.detail || "Request failed");
-      }
-      return data;
-    } catch (err) {
-      console.error(`POST ${endpoint} failed:`, err);
-      throw err;
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      method: "POST",
+      headers: getAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+      cache: "no-store"
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(extractErrorMessage(data, "Request failed"));
     }
+    return data;
   },
 
   async put(endpoint, payload) {
-    try {
-      const response = await fetch(`${API_BASE}${endpoint}`, {
-        method: "PUT",
-        headers: getAuthHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(payload),
-        cache: "no-store"
-      });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.detail?.message || data.detail || "Request failed");
-      }
-      return data;
-    } catch (err) {
-      console.error(`PUT ${endpoint} failed:`, err);
-      throw err;
+    const response = await fetch(`${API_BASE}${endpoint}`, {
+      method: "PUT",
+      headers: getAuthHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+      cache: "no-store"
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(extractErrorMessage(data, "Request failed"));
     }
+    return data;
   },
 
   // Authentication Endpoints
@@ -98,7 +132,7 @@ const ApiClient = {
     return this.get(`/api/employees/${id}`);
   },
 
-  // Attendance Endpoints
+  // Attendance Endpoints — the employee is identified by the session token
   getStatus(employeeId) {
     return this.get(`/api/attendance/status/${employeeId}`);
   },
@@ -107,40 +141,12 @@ const ApiClient = {
     return this.get(`/api/attendance/history/${employeeId}`);
   },
 
-  clockIn(employeeId, latitude, longitude, accuracy) {
-    return this.post("/api/attendance/clock-in", {
-      employee_id: employeeId,
-      latitude,
-      longitude,
-      accuracy
-    });
+  clockIn(latitude, longitude, accuracy) {
+    return this.post("/api/attendance/clock-in", { latitude, longitude, accuracy });
   },
 
-  clockOut(employeeId, latitude, longitude, accuracy) {
-    return this.post("/api/attendance/clock-out", {
-      employee_id: employeeId,
-      latitude,
-      longitude,
-      accuracy
-    });
-  },
-
-  syncShift(record) {
-    return this.post("/api/attendance/sync-shift", {
-      employee_id: record.employee_id,
-      date: record.date,
-      clock_in_time: record.clock_in_time,
-      clock_in_lat: record.clock_in_lat,
-      clock_in_lon: record.clock_in_lon,
-      clock_in_distance: record.clock_in_distance,
-      clock_out_time: record.clock_out_time,
-      clock_out_lat: record.clock_out_lat,
-      clock_out_lon: record.clock_out_lon,
-      clock_out_distance: record.clock_out_distance,
-      status: record.status,
-      is_late: record.is_late || false,
-      notes: record.notes || "Device sync"
-    });
+  clockOut(latitude, longitude, accuracy) {
+    return this.post("/api/attendance/clock-out", { latitude, longitude, accuracy });
   },
 
   // Admin Endpoints
@@ -168,11 +174,37 @@ const ApiClient = {
 
   seedDemo() {
     return this.post("/api/admin/seed-demo-data", {});
+  },
+
+  // Authenticated CSV download — credential stays in the header, not the URL
+  async exportCsv(date) {
+    const params = new URLSearchParams();
+    if (date) params.append("date", date);
+    const query = params.toString() ? `?${params.toString()}` : "";
+
+    const response = await fetch(`${API_BASE}/api/admin/export/csv${query}`, {
+      headers: getAuthHeaders(),
+      cache: "no-store"
+    });
+    if (!response.ok) {
+      throw new Error("Export failed. Please sign in again.");
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `attendance_report_${date || "all"}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
   }
 };
 
 if (typeof window !== "undefined") {
   window.ApiClient = ApiClient;
+  window.escapeHtml = escapeHtml;
 }
 if (typeof module !== "undefined" && module.exports) {
   module.exports = ApiClient;

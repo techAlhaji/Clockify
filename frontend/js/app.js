@@ -64,30 +64,16 @@ async function init() {
 
   try {
     // 1. Fetch Geofence Settings
+    // The server is the only source of truth for the workplace perimeter.
     AppState.workplace = await ApiClient.getGeofence();
-    
-    // Check if admin has saved a permanent geofence in localStorage
-    const savedGeoStr = localStorage.getItem("clockify_permanent_geofence");
-    if (savedGeoStr) {
-      try {
-        const savedGeo = JSON.parse(savedGeoStr);
-        const diff = Math.abs(AppState.workplace.latitude - savedGeo.latitude) > 0.00005 ||
-                     Math.abs(AppState.workplace.longitude - savedGeo.longitude) > 0.00005 ||
-                     parseFloat(AppState.workplace.radius_meters) !== parseFloat(savedGeo.radius_meters);
-        if (diff) {
-          await ApiClient.updateGeofence(savedGeo);
-          AppState.workplace = savedGeo;
-        }
-      } catch (e) {}
-    }
-    
+
     // 2. Fetch Employees List to populate login selector
     AppState.employeesList = await ApiClient.getEmployees();
     populateEmployeeLoginSelect();
 
     // 3. Check for Authenticated Employee Session
     const authRaw = localStorage.getItem(STORAGE_AUTH_KEY);
-    if (authRaw) {
+    if (authRaw && ApiClient.hasEmployeeToken()) {
       try {
         const savedEmp = JSON.parse(authRaw);
         // Sync with latest employee data from backend if present
@@ -107,8 +93,8 @@ async function init() {
 // Populate login selector with roster
 function populateEmployeeLoginSelect() {
   if (!elements.loginEmployeeSelect) return;
-  const opts = AppState.employeesList.map(e => 
-    `<option value="${e.id}" data-staff="${e.staff_id}">${e.name} — ${e.department} (${e.staff_id})</option>`
+  const opts = AppState.employeesList.map(e =>
+    `<option value="${e.id}" data-staff="${escapeHtml(e.staff_id)}">${escapeHtml(e.name)} — ${escapeHtml(e.department)} (${escapeHtml(e.staff_id)})</option>`
   ).join('');
   elements.loginEmployeeSelect.innerHTML = `<option value="">— Choose your name from roster —</option>` + opts;
 }
@@ -196,52 +182,22 @@ function saveShiftLock(employeeId, status, record, dateStr = getLocalDateString(
   }
 }
 
-// Refresh Shift Status & History with persistent lock priority
+// Refresh Shift Status & History — the server is the source of truth.
+// The client can no longer write attendance records; local storage is only a
+// cache for the current day's UI state.
 async function refreshShiftData() {
   if (!AppState.currentEmployee) return;
   const empId = AppState.currentEmployee.id;
   const today = getLocalDateString();
 
-  // 1. Immediately apply persistent shift lock from device storage
-  const localLock = getShiftLock(empId, today);
-  if (localLock) {
-    AppState.shiftStatus = localLock.status;
-    AppState.todayRecord = localLock.record;
-    updateActionControls();
-    updateTodaySummary();
-  }
-
   try {
     const statusData = await ApiClient.getStatus(empId);
 
-    // If device lock says CLOCKED_OUT, STRICTLY ENFORCE CLOCKED_OUT (Cannot reset on refresh!)
-    if (localLock && localLock.status === "CLOCKED_OUT") {
-      AppState.shiftStatus = "CLOCKED_OUT";
-      AppState.todayRecord = localLock.record || statusData.record;
-      // Auto-sync completed shift to backend if backend was missing it (e.g. serverless cold start)
-      if (statusData.status !== "CLOCKED_OUT" && localLock.record) {
-        try {
-          await ApiClient.syncShift(localLock.record);
-        } catch (e) {}
-      }
-    } else if (statusData.status === "CLOCKED_OUT") {
-      AppState.shiftStatus = "CLOCKED_OUT";
-      AppState.todayRecord = statusData.record;
-      saveShiftLock(empId, "CLOCKED_OUT", statusData.record, today);
-    } else if (localLock && localLock.status === "CLOCKED_IN") {
-      AppState.shiftStatus = "CLOCKED_IN";
-      AppState.todayRecord = localLock.record || statusData.record;
-      if (statusData.status === "NOT_CLOCKED_IN" && localLock.record) {
-        try {
-          await ApiClient.syncShift(localLock.record);
-        } catch (e) {}
-      }
-    } else {
-      AppState.shiftStatus = statusData.status;
-      AppState.todayRecord = statusData.record;
-      if (statusData.status === "CLOCKED_IN") {
-        saveShiftLock(empId, "CLOCKED_IN", statusData.record, today);
-      }
+    AppState.shiftStatus = statusData.status;
+    AppState.todayRecord = statusData.record;
+
+    if (statusData.status === "CLOCKED_IN" || statusData.status === "CLOCKED_OUT") {
+      saveShiftLock(empId, statusData.status, statusData.record, today);
     }
 
     updateActionControls();
@@ -251,6 +207,9 @@ async function refreshShiftData() {
     renderHistory(historyData);
   } catch (err) {
     console.error("Failed to refresh shift:", err);
+    if ((err.message || "").toLowerCase().includes("session")) {
+      handleSessionExpired();
+    }
   }
 }
 
@@ -316,8 +275,8 @@ function renderHistory(records) {
           <span class="h-mon">${dayMon}</span>
         </div>
         <div class="h-info">
-          <div class="h-date-str">${r.date}</div>
-          <div class="h-times">In: ${r.clock_in_time || 'N/A'}&nbsp;·&nbsp;Out: ${r.clock_out_time || 'In Progress'}</div>
+          <div class="h-date-str">${escapeHtml(r.date)}</div>
+          <div class="h-times">In: ${escapeHtml(r.clock_in_time || 'N/A')}&nbsp;·&nbsp;Out: ${escapeHtml(r.clock_out_time || 'In Progress')}</div>
         </div>
       </div>
       <span class="h-badge ${r.is_late ? 'h-late' : 'h-ontime'}">
@@ -399,7 +358,6 @@ async function handleClockIn() {
 
     elements.actionBtnText.textContent = "Clocking In...";
     const res = await ApiClient.clockIn(
-      empId,
       loc.latitude,
       loc.longitude,
       loc.accuracy
@@ -442,7 +400,6 @@ async function handleClockOut() {
 
     elements.actionBtnText.textContent = "Clocking Out...";
     const res = await ApiClient.clockOut(
-      empId,
       loc.latitude,
       loc.longitude,
       loc.accuracy
@@ -507,6 +464,7 @@ function setupEventListeners() {
         }
 
         const res = await ApiClient.employeeLogin(targetIdentifier, pin);
+        ApiClient.setEmployeeToken(res.token);
         AppState.currentEmployee = res.employee;
         localStorage.setItem(STORAGE_AUTH_KEY, JSON.stringify(res.employee));
         
@@ -528,11 +486,19 @@ function setupEventListeners() {
   if (elements.btnEmployeeLogout) {
     elements.btnEmployeeLogout.addEventListener('click', () => {
       localStorage.removeItem(STORAGE_AUTH_KEY);
+      ApiClient.clearEmployeeToken();
       if (elements.loginPin) elements.loginPin.value = '';
       showLoginGate();
       showToast('You have securely signed out of your portal.', 'info');
     });
   }
+}
+
+function handleSessionExpired() {
+  ApiClient.clearEmployeeToken();
+  localStorage.removeItem(STORAGE_AUTH_KEY);
+  showLoginGate();
+  showToast('Your session expired. Please sign in again.', 'warning');
 }
 
 function getInitials(name) {
@@ -547,8 +513,9 @@ function showToast(message, type = 'info') {
   toast.className = `toast ${type}`;
   toast.innerHTML = `
     <div class="t-icon">${TOAST_ICONS[type] || 'ℹ'}</div>
-    <span>${message}</span>
+    <span></span>
   `;
+  toast.querySelector('span').textContent = message;
   elements.toastContainer.appendChild(toast);
   setTimeout(() => {
     toast.style.opacity = '0';
