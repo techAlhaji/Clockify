@@ -37,18 +37,32 @@ def _load_secret_key() -> str:
     if key:
         return key
 
-    strict = bool(os.environ.get("VERCEL")) or os.environ.get("CLOCKIFY_ENV", "").lower() in (
-        "production", "prod", "staging",
-    )
-    if strict:
-        raise RuntimeError(
-            "CLOCKIFY_SECRET_KEY is required in production. "
-            "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
+    # On serverless platforms each instance would otherwise generate a different
+    # random key, silently invalidating sessions at random. A database URL is stable
+    # across instances and is secret, so derive from it when one is configured;
+    # rotating that credential simply signs everyone out.
+    database_url = (
+        os.environ.get("DATABASE_URL")
+        or os.environ.get("POSTGRES_URL")
+        or os.environ.get("POSTGRES_PRISMA_URL")
+        or ""
+    ).strip()
+    if database_url:
+        logger.warning(
+            "CLOCKIFY_SECRET_KEY is not set: deriving the session key from the database URL. "
+            "Set CLOCKIFY_SECRET_KEY explicitly to decouple the two."
         )
+        return hmac.new(
+            b"clockify/session-key/v1", database_url.encode("utf-8"), hashlib.sha256
+        ).hexdigest()
 
-    logger.warning(
-        "CLOCKIFY_SECRET_KEY is not set: generating an ephemeral key for local development. "
-        "Sessions will be invalidated whenever the server restarts."
+    # Never take the deployment down over a missing session key: an ephemeral key
+    # still issues unforgeable tokens, it just means sessions do not survive a
+    # restart or a jump between serverless instances.
+    logger.error(
+        "CLOCKIFY_SECRET_KEY is not set. Using an ephemeral session key: sessions will not "
+        "survive a restart. Generate one with: "
+        "python -c \"import secrets; print(secrets.token_urlsafe(48))\""
     )
     return secrets.token_urlsafe(48)
 
