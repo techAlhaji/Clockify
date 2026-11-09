@@ -148,8 +148,12 @@ const ApiClient = {
 
   // Attendance Endpoints — the employee is identified by the session token
   getStatus(employeeId) {
-    return this.get(`/api/attendance/status/${employeeId}`);
-  },
+    return this.get(`/api/attendance/status/${employeeId}`).then(r => {
+      // Ensure backward compatibility: if server adds server_time/timezone_offset
+      // the client just reads them; existing callers that only check status
+      // still work unchanged.
+      return r;
+    });
 
   getHistory(employeeId) {
     return this.get(`/api/attendance/history/${employeeId}`);

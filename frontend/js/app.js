@@ -154,6 +154,30 @@ function getLocalDateString(d = new Date()) {
   return `${y}-${m}-${day}`;
 }
 
+// Detect clock skew between device and server
+// Server returns server_time and timezone_offset in getStatus response
+let lastSkewWarning = 0;
+const SKEW_WARN_COOLDOWN_MS = 60000; // 1 min cooldown
+
+function computeSkewMinutes(serverTimeStr) {
+  // Server time is HH:MM:SS in WAT (UTC+1)
+  // Device time is whatever getLocalDateString() provides
+  const [sh, sm, ss] = serverTimeStr.split(":").map(Number);
+  const serverMinutes = sh * 60 + sm;
+  const now = new Date();
+  const deviceMinutes = now.getHours() * 60 + now.getMinutes();
+  return serverMinutes - deviceMinutes; // positive = server ahead
+}
+
+function maybeShowSkewWarning(skewMinutes) {
+  const now = Date.now();
+  if (now - lastSkewWarning < SKEW_WARN_COOLDOWN_MS) return;
+  if (Math.abs(skewMinutes) > 2) {
+    showToast(`⚠ Clock skew: server time (${skewMinutes > 0 ? 'ahead' : 'behind'}) ${Math.abs(skewMinutes)} min` + (skewMinutes !== 0 ? ' from your device' : ''), "warning");
+    lastSkewWarning = now;
+  }
+}
+
 function getShiftLockKey(employeeId, dateStr = getLocalDateString()) {
   return `clockify_shift_lock_${employeeId}_${dateStr}`;
 }
@@ -188,17 +212,25 @@ function saveShiftLock(employeeId, status, record, dateStr = getLocalDateString(
 async function refreshShiftData() {
   if (!AppState.currentEmployee) return;
   const empId = AppState.currentEmployee.id;
-  const today = getLocalDateString();
 
   try {
     const statusData = await ApiClient.getStatus(empId);
 
     AppState.shiftStatus = statusData.status;
     AppState.todayRecord = statusData.record;
+    AppState.serverTime = statusData.server_time;
+    AppState.timezoneOffset = statusData.timezone_offset;
+
+    // Use the server's date, not the device date, for the shift lock key.
+    // This ensures the lock survives across device timezones/changes and refreshes.
+    const lockDate = statusData.date || getLocalDateString();
 
     if (statusData.status === "CLOCKED_IN" || statusData.status === "CLOCKED_OUT") {
-      saveShiftLock(empId, statusData.status, statusData.record, today);
+      saveShiftLock(empId, statusData.status, statusData.record, lockDate);
     }
+
+    // Show clock-skew warning if server time differs from device by more than 2 min
+    maybeShowSkewWarning(statusData.server_time || "");
 
     updateActionControls();
     updateTodaySummary();
