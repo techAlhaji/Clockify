@@ -30,6 +30,20 @@ function getAuthHeaders(customHeaders = {}) {
   return headers;
 }
 
+function buildQuery(params, keys) {
+  const query = new URLSearchParams();
+  keys.forEach(key => {
+    const value = params[key];
+    if (value === undefined || value === null || value === "") return;
+    if (typeof value === "boolean") {
+      if (value) query.append(key, "true");
+      return;
+    }
+    query.append(key, value);
+  });
+  return query.toString();
+}
+
 function extractErrorMessage(data, fallback) {
   const detail = data && data.detail;
   if (!detail) return fallback;
@@ -158,18 +172,27 @@ const ApiClient = {
     return this.put("/api/admin/geofence", payload);
   },
 
-  getAdminMetrics(date) {
-    const q = date ? `?date=${encodeURIComponent(date)}` : "";
-    return this.get(`/api/admin/metrics${q}`);
+  getAdminMetrics(filters) {
+    // Accept a plain date for backwards compatibility or a {date, start_date,
+    // end_date} object.
+    const params = typeof filters === "string" || filters == null
+      ? { date: filters }
+      : filters;
+    const query = buildQuery(params, ["date", "start_date", "end_date"]);
+    return this.get(`/api/admin/metrics${query ? `?${query}` : ""}`);
   },
 
-  getAdminRecords(date, employeeId, view) {
-    const params = new URLSearchParams();
-    if (date) params.append("date", date);
-    if (employeeId) params.append("employee_id", employeeId);
-    if (view) params.append("view", view);
-    const q = params.toString() ? `?${params.toString()}` : "";
-    return this.get(`/api/admin/records${q}`);
+  getAdminRecords(filters = {}, employeeId, view) {
+    // Accept the new filter object or the legacy (date, employeeId, view)
+    // positional form.
+    const params = typeof filters === "string" || filters == null
+      ? { date: filters, employee_id: employeeId, view }
+      : filters;
+    const query = buildQuery(params, [
+      "date", "start_date", "end_date", "employee_id", "department",
+      "status", "late_only", "search", "view", "page", "page_size"
+    ]);
+    return this.get(`/api/admin/records${query ? `?${query}` : ""}`);
   },
 
   seedDemo() {
@@ -177,12 +200,16 @@ const ApiClient = {
   },
 
   // Authenticated CSV download — credential stays in the header, not the URL
-  async exportCsv(date) {
-    const params = new URLSearchParams();
-    if (date) params.append("date", date);
-    const query = params.toString() ? `?${params.toString()}` : "";
+  async exportCsv(filters) {
+    const params = typeof filters === "string" || filters == null
+      ? { date: filters }
+      : filters;
+    const query = buildQuery(params, [
+      "date", "start_date", "end_date", "employee_id", "department",
+      "status", "late_only", "search"
+    ]);
 
-    const response = await fetch(`${API_BASE}/api/admin/export/csv${query}`, {
+    const response = await fetch(`${API_BASE}/api/admin/export/csv${query ? `?${query}` : ""}`, {
       headers: getAuthHeaders(),
       cache: "no-store"
     });
@@ -194,7 +221,8 @@ const ApiClient = {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `attendance_report_${date || "all"}.csv`;
+    const dateLabel = params.start_date || params.date || "all";
+    link.download = `attendance_report_${dateLabel}.csv`;
     document.body.appendChild(link);
     link.click();
     link.remove();

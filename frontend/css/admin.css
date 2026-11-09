@@ -629,6 +629,201 @@ body.admin-body {
   white-space: nowrap;
 }
 
+/* View switch + server-side filters */
+.view-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px;
+  background: var(--pill-bg);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-sm);
+}
+
+.view-switch-btn {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t2);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.view-switch-btn:hover {
+  color: var(--navy);
+}
+
+.view-switch-btn.is-active {
+  background: var(--surface);
+  color: var(--navy);
+  box-shadow: var(--shadow-sm);
+}
+
+.date-range-fields {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: opacity .15s ease;
+}
+
+.date-range-fields label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--t3);
+}
+
+.date-range-fields.is-disabled {
+  opacity: .55;
+}
+
+.tbl-toolbar .date-range-fields .table-filter {
+  width: 145px;
+}
+
+.tbl-toolbar select.form-control {
+  width: 180px;
+  padding-right: 30px;
+  cursor: pointer;
+}
+
+.filter-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--b2);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.filter-check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--navy);
+  cursor: pointer;
+}
+
+.active-filter-bar[hidden],
+.tbl-pagination[hidden] {
+  display: none;
+}
+
+.active-filter-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-sm);
+}
+
+.active-filter-chips {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 10px;
+  border-radius: var(--r-pill);
+  background: var(--pill-bg);
+  color: var(--navy);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.btn-link {
+  padding: 4px 2px;
+  border: 0;
+  background: transparent;
+  color: var(--navy);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.tbl-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 14px 18px;
+  background: var(--surface);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-sm);
+}
+
+.tbl-page-summary {
+  margin: 0;
+  color: var(--t2);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tbl-page-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.page-size-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--t2);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.page-size-label .form-control {
+  width: auto;
+  height: 36px;
+  padding: 0 8px;
+  font-size: 13px;
+}
+
+.page-indicator {
+  min-width: 88px;
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.tbl-page-controls .btn-ghost {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
 .table-card {
   background: var(--surface);
   border: 1px solid var(--b1);
@@ -929,9 +1124,28 @@ body.admin-body .toast-container {
     width: 100%;
   }
 
+  .date-range-fields {
+    flex: 1 1 100%;
+  }
+
+  .tbl-toolbar .date-range-fields .table-filter {
+    flex: 1 1 140px;
+    width: auto;
+  }
+
   .table-filter {
     flex: 1 1 140px;
     width: auto;
+  }
+
+  .tbl-toolbar select.form-control {
+    flex: 1 1 180px;
+    width: auto;
+  }
+
+  .tbl-pagination {
+    align-items: flex-start;
+    flex-direction: column;
   }
 
   #overview,
@@ -967,6 +1181,22 @@ body.admin-body .toast-container {
   .tbl-toolbar .btn-primary,
   .tbl-toolbar .btn-ghost {
     flex: 1 1 auto;
+  }
+
+  .view-switch {
+    width: 100%;
+  }
+
+  .view-switch-btn {
+    flex: 1 1 auto;
+  }
+
+  .tbl-page-controls {
+    width: 100%;
+  }
+
+  .page-size-label {
+    flex: 1 1 100%;
   }
 }
 
