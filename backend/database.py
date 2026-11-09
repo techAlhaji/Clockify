@@ -150,6 +150,16 @@ def _connect():
 # Setup: create tables and starter data
 # ---------------------------------------------------------------------------
 
+def _ensure_column(cursor, table: str, column: str, column_type: str):
+    """Add a column to an existing table when it is missing."""
+    if IS_POSTGRES:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {column} {column_type}")
+        return
+    cursor.execute(f"PRAGMA table_info({table})")
+    if column not in [col[1] for col in cursor.fetchall()]:
+        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
+
+
 def _create_tables(cursor):
     # One schema for both engines; only the auto-increment id is written differently.
     # DOUBLE PRECISION keeps full GPS precision in Postgres (SQLite stores it as REAL).
@@ -185,20 +195,47 @@ def _create_tables(cursor):
             clock_in_lat DOUBLE PRECISION,
             clock_in_lon DOUBLE PRECISION,
             clock_in_distance DOUBLE PRECISION,
+            clock_in_client_captured_at TEXT,
+            clock_in_received_at TEXT,
             clock_out_time TEXT,
             clock_out_lat DOUBLE PRECISION,
             clock_out_lon DOUBLE PRECISION,
             clock_out_distance DOUBLE PRECISION,
+            clock_out_client_captured_at TEXT,
+            clock_out_received_at TEXT,
             status TEXT NOT NULL,
             is_late INTEGER DEFAULT 0,
             notes TEXT
         )""")
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS clock_intents (
+            id {id_col},
+            intent_id TEXT UNIQUE NOT NULL,
+            employee_id INTEGER NOT NULL REFERENCES employees(id),
+            action TEXT NOT NULL,
+            client_captured_at TEXT,
+            issued_at TEXT NOT NULL,
+            received_at TEXT,
+            status TEXT NOT NULL DEFAULT 'ISSUED',
+            record_id INTEGER,
+            message TEXT
+        )""")
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_clock_intents_employee
+        ON clock_intents(employee_id, action)
+    """)
 
-    # Old SQLite files were created before the is_admin column existed: add it if missing.
-    if not IS_POSTGRES:
-        cursor.execute("PRAGMA table_info(employees)")
-        if "is_admin" not in [col[1] for col in cursor.fetchall()]:
-            cursor.execute("ALTER TABLE employees ADD COLUMN is_admin INTEGER DEFAULT 0")
+    # Databases created before offline clock events need these columns.
+    for column in (
+        "clock_in_client_captured_at",
+        "clock_in_received_at",
+        "clock_out_client_captured_at",
+        "clock_out_received_at",
+    ):
+        _ensure_column(cursor, "attendance_records", column, "TEXT")
+
+    # Old databases were created before the is_admin column existed: add it if missing.
+    _ensure_column(cursor, "employees", "is_admin", "INTEGER DEFAULT 0")
 
 
 def _seed(cursor):

@@ -1,6 +1,6 @@
 /**
  * Clockify — Centralized API Client (api.js)
- * Clean async fetch handlers and error abstraction.
+ * Clean async fetch handlers, structured errors and clock-intent idempotency.
  *
  * Sessions are held in sessionStorage only (cleared when the tab closes) and
  * travel exclusively in the Authorization header — never in a URL, never in
@@ -8,9 +8,21 @@
  */
 
 const API_BASE = window.location.origin;
+const API_TIMEOUT_MS = 15000;
 
 const ADMIN_TOKEN_KEY = "clockify_admin_token";
 const EMPLOYEE_TOKEN_KEY = "clockify_employee_token";
+
+class ApiError extends Error {
+  constructor(message, options = {}) {
+    super(message);
+    this.name = "ApiError";
+    this.status = options.status || 0;
+    this.code = options.code || null;
+    this.network = Boolean(options.network);
+    this.detail = options.detail || null;
+  }
+}
 
 function readSessionToken(key) {
   try {
@@ -30,12 +42,18 @@ function getAuthHeaders(customHeaders = {}) {
   return headers;
 }
 
-function extractErrorMessage(data, fallback) {
+function parseApiError(data, fallback) {
   const detail = data && data.detail;
-  if (!detail) return fallback;
-  if (typeof detail === "string") return detail;
-  if (typeof detail === "object") return detail.message || detail.error || fallback;
-  return fallback;
+  if (!detail) return { message: fallback, code: null, detail: null };
+  if (typeof detail === "string") return { message: detail, code: null, detail };
+  if (typeof detail === "object") {
+    return {
+      message: detail.message || detail.error || fallback,
+      code: detail.error || null,
+      detail
+    };
+  }
+  return { message: fallback, code: null, detail: null };
 }
 
 // Escape untrusted text before it is interpolated into innerHTML.
@@ -43,6 +61,46 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, ch => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   }[ch]));
+}
+
+async function apiRequest(method, endpoint, payload) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+
+  const options = {
+    method,
+    headers: getAuthHeaders(payload !== undefined ? { "Content-Type": "application/json" } : {}),
+    cache: "no-store",
+    signal: controller.signal
+  };
+
+  if (payload !== undefined) {
+    options.body = JSON.stringify(payload);
+  }
+
+  let response;
+  try {
+    response = await fetch(`${API_BASE}${endpoint}`, options);
+  } catch (err) {
+    const aborted = err && err.name === "AbortError";
+    throw new ApiError(
+      aborted
+        ? "The server took too long to respond. Your clock event stays queued on this device."
+        : "Cannot reach the Clockify server. Check your connection.",
+      { network: true }
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    const { message, code, detail } = parseApiError(data, "Request failed");
+    throw new ApiError(message, { status: response.status, code, detail });
+  }
+
+  return data;
 }
 
 const ApiClient = {
@@ -66,44 +124,16 @@ const ApiClient = {
     return Boolean(readSessionToken(EMPLOYEE_TOKEN_KEY));
   },
 
-  async get(endpoint) {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      headers: getAuthHeaders(),
-      cache: "no-store"
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(extractErrorMessage(data, "API request failed"));
-    }
-    return data;
+  get(endpoint) {
+    return apiRequest("GET", endpoint);
   },
 
-  async post(endpoint, payload) {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      method: "POST",
-      headers: getAuthHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(payload),
-      cache: "no-store"
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(extractErrorMessage(data, "Request failed"));
-    }
-    return data;
+  post(endpoint, payload) {
+    return apiRequest("POST", endpoint, payload === undefined ? {} : payload);
   },
 
-  async put(endpoint, payload) {
-    const response = await fetch(`${API_BASE}${endpoint}`, {
-      method: "PUT",
-      headers: getAuthHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(payload),
-      cache: "no-store"
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(extractErrorMessage(data, "Request failed"));
-    }
-    return data;
+  put(endpoint, payload) {
+    return apiRequest("PUT", endpoint, payload);
   },
 
   // Authentication Endpoints
@@ -141,12 +171,29 @@ const ApiClient = {
     return this.get(`/api/attendance/history/${employeeId}`);
   },
 
-  clockIn(latitude, longitude, accuracy) {
-    return this.post("/api/attendance/clock-in", { latitude, longitude, accuracy });
+  /** Server-issued, short-lived, single-use idempotency key (online path). */
+  issueIntent(action) {
+    return this.post("/api/attendance/intent", { action });
   },
 
-  clockOut(latitude, longitude, accuracy) {
-    return this.post("/api/attendance/clock-out", { latitude, longitude, accuracy });
+  clockIn(latitude, longitude, accuracy, intentId, clientCapturedAt) {
+    return this.post("/api/attendance/clock-in", {
+      latitude,
+      longitude,
+      accuracy,
+      client_intent_id: intentId || null,
+      client_captured_at: clientCapturedAt || null
+    });
+  },
+
+  clockOut(latitude, longitude, accuracy, intentId, clientCapturedAt) {
+    return this.post("/api/attendance/clock-out", {
+      latitude,
+      longitude,
+      accuracy,
+      client_intent_id: intentId || null,
+      client_captured_at: clientCapturedAt || null
+    });
   },
 
   // Admin Endpoints
@@ -204,6 +251,7 @@ const ApiClient = {
 
 if (typeof window !== "undefined") {
   window.ApiClient = ApiClient;
+  window.ApiError = ApiError;
   window.escapeHtml = escapeHtml;
 }
 if (typeof module !== "undefined" && module.exports) {

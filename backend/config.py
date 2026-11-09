@@ -48,3 +48,8 @@ ADMIN_CONFIG = {
 
 # Geolocation Accuracy Threshold: fixes worse than this are rejected.
 MAX_ALLOWED_GPS_ACCURACY_METERS = float(os.environ.get("MAX_GPS_ACCURACY_METERS", "80"))
+
+# Offline clock-intent replay window
+CLOCK_INTENT_TTL_SECONDS = int(os.environ.get("CLOCKIFY_INTENT_TTL_SECONDS", "600"))
+MAX_INTENT_AGE_SECONDS = int(os.environ.get("CLOCKIFY_MAX_INTENT_AGE_SECONDS", "600"))
+MAX_CLOCK_SKEW_SECONDS = int(os.environ.get("CLOCKIFY_MAX_CLOCK_SKEW_SECONDS", "120"))

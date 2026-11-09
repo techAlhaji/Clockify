@@ -1,0 +1,27 @@
+{
+  "id": "/",
+  "name": "Clockify — Geofenced Attendance",
+  "short_name": "Clockify",
+  "description": "Clock in and out at work with GPS geofence verification, even when connectivity drops.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0e17",
+  "theme_color": "#6366f1",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/static/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icons/icon-maskable.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ]
+}

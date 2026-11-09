@@ -52,3 +52,27 @@ if os.path.exists(FRONTEND_DIR):
     @app.get("/admin")
     def serve_admin_portal():
         return FileResponse(os.path.join(FRONTEND_DIR, "admin.html"))
+
+    @app.get("/manifest.webmanifest")
+    def serve_manifest():
+        return FileResponse(
+            os.path.join(FRONTEND_DIR, "manifest.webmanifest"),
+            media_type="application/manifest+json",
+        )
+
+    # The service worker must be served from the root so its default scope
+    # covers the whole app shell (/*), not just /static/*.
+    @app.get("/service-worker.js")
+    def serve_service_worker():
+        return FileResponse(
+            os.path.join(FRONTEND_DIR, "service-worker.js"),
+            media_type="application/javascript",
+            headers={
+                "Service-Worker-Allowed": "/",
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+            },
+        )
+
+    @app.get("/offline")
+    def serve_offline_screen():
+        return FileResponse(os.path.join(FRONTEND_DIR, "offline.html"))

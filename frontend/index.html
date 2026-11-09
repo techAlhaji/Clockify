@@ -5,6 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Clockify — Employee Portal</title>
   <meta name="description" content="Geofenced employee attendance portal with GPS proximity verification.">
+  <meta name="theme-color" content="#7933FF">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/static/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/static/icons/icon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
@@ -19,10 +23,17 @@
       <span>Clockify</span>
     </div>
     <nav class="pill-nav" aria-label="Primary">
+      <span class="conn-pill online" id="connectionBadge">Online</span>
       <a href="/" class="pill-nav-item is-current">Employee Portal</a>
       <a id="navAdminLink" href="/admin" class="pill-nav-item">Admin</a>
     </nav>
   </header>
+
+  <!-- Offline Banner -->
+  <div class="offline-banner" id="offlineBanner" role="status" hidden>
+    <strong>Offline mode</strong>
+    <span>Clock events are saved on this device and will submit when you reconnect.</span>
+  </div>
 
   <!-- View 1 — Sign in -->
   <main id="employeeLoginGate" style="display:block;">
@@ -172,14 +183,28 @@
 
         </div>
 
+        <section class="card sync-panel" id="syncPanel" hidden>
+          <div class="sync-header">
+            <h2 class="sync-title">Offline queue <span class="sync-count" id="pendingCount">All events synced</span></h2>
+            <button type="button" id="btnRetryNow" class="btn-ghost">Retry now</button>
+          </div>
+          <p class="sync-hint">
+            Every tap is stored on this device first, then confirmed by the server. Pending events retry
+            automatically with backoff when you reconnect.
+          </p>
+          <div class="sync-list" id="syncList"></div>
+        </section>
+
         <section class="shift-summary">
           <div class="summary-card">
             <span class="summary-label">Arrival Time</span>
             <span class="summary-value"><span class="stat-dot stat-dot-green" aria-hidden="true"></span><span id="todayClockIn">--:--</span></span>
+            <span class="summary-note" id="clockInNote">Not synced yet</span>
           </div>
           <div class="summary-card">
             <span class="summary-label">Departure Time</span>
             <span class="summary-value"><span class="stat-dot stat-dot-navy" aria-hidden="true"></span><span id="todayClockOut">--:--</span></span>
+            <span class="summary-note" id="clockOutNote">Not synced yet</span>
           </div>
         </section>
 
@@ -220,6 +245,7 @@
   <!-- JavaScript Modules -->
   <script src="/static/js/api.js"></script>
   <script src="/static/js/geo.js"></script>
+  <script src="/static/js/queue.js"></script>
   <script src="/static/js/app.js"></script>
 </body>
 </html>

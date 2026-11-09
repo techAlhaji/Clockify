@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import Optional, List
+from datetime import datetime
 
 # Geolocation Coordinates Payload
 class GeoCoordinates(BaseModel):
@@ -13,12 +14,30 @@ class ClockInRequest(BaseModel):
     latitude: float = Field(..., ge=-90.0, le=90.0)
     longitude: float = Field(..., ge=-180.0, le=180.0)
     accuracy: Optional[float] = Field(None, ge=0.0, description="GPS Accuracy in meters")
+    client_intent_id: Optional[str] = Field(
+        None, max_length=64,
+        description="Idempotency key: a server-issued intent id or a client-generated UUID",
+    )
+    client_captured_at: Optional[datetime] = Field(
+        None, description="ISO-8601 instant when the employee captured the event on the device",
+    )
 
 # Clock-Out Request
 class ClockOutRequest(BaseModel):
     latitude: float = Field(..., ge=-90.0, le=90.0)
     longitude: float = Field(..., ge=-180.0, le=180.0)
     accuracy: Optional[float] = Field(None, ge=0.0, description="GPS Accuracy in meters")
+    client_intent_id: Optional[str] = Field(
+        None, max_length=64,
+        description="Idempotency key: a server-issued intent id or a client-generated UUID",
+    )
+    client_captured_at: Optional[datetime] = Field(
+        None, description="ISO-8601 instant when the employee captured the event on the device",
+    )
+
+# Clock Intent Issue Request (server-issued single-use idempotency key)
+class ClockIntentRequest(BaseModel):
+    action: str = Field(..., pattern="^(IN|OUT)$", description="Clock action: IN or OUT")
 
 # Geofence Update Request
 class GeofenceUpdate(BaseModel):
