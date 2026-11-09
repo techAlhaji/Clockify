@@ -1821,3 +1821,96 @@ a {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ================= Live geofence radar ================= */
+.radar-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.radar-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: 1px solid var(--b1);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--t2);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.radar-refresh:hover {
+  color: var(--t1);
+  border-color: var(--b2);
+}
+
+.radar-refresh:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+.radar-refresh svg {
+  width: 14px;
+  height: 14px;
+}
+
+.radar-refresh.is-spinning svg {
+  animation: radarSweep .9s linear infinite;
+}
+
+.radar-freshness {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--t3);
+}
+
+.radar-freshness.is-stale {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.radar-freshness.is-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.pill-stale {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.pill-denied {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.radar-wrap.is-denied {
+  border-color: rgba(192, 38, 45, .35);
+}
+
+.radar-wrap.is-denied .radar-spin {
+  animation-play-state: paused;
+  opacity: .35;
+}
+
+@media (max-width: 640px) {
+  .radar-head-actions {
+    gap: 6px;
+  }
+
+  .radar-freshness {
+    font-size: 11px;
+  }
+}
+
+.radar-head {
+  flex-wrap: wrap;
+}

@@ -61,7 +61,11 @@ const GeoService = {
             lowAccuracy: accuracy > ACCURACY_WARNING_THRESHOLD_M
           });
         },
-        error => reject(new Error(mapGeoError(error))),
+        error => {
+          const geoError = new Error(mapGeoError(error));
+          geoError.code = error.code;
+          reject(geoError);
+        },
         GEO_OPTIONS
       );
     });
@@ -88,41 +92,77 @@ const GeoService = {
           latitude,
           longitude,
           accuracy: Math.round(accuracy),
+          timestamp: position.timestamp,
           lowAccuracy: accuracy > ACCURACY_WARNING_THRESHOLD_M
         });
       },
       error => {
-        if (errorCallback) errorCallback(new Error(mapGeoError(error)));
+        if (errorCallback) {
+          const geoError = new Error(mapGeoError(error));
+          geoError.code = error.code;
+          errorCallback(geoError);
+        }
       },
       GEO_OPTIONS
     );
   },
 
+  // Stop a watcher started by watchPosition/watchDistanceToOffice.
+  clearWatch(watchId) {
+    if (watchId === null || watchId === undefined) return;
+    if ("geolocation" in navigator) {
+      navigator.geolocation.clearWatch(watchId);
+    }
+  },
+
   // Real-time distance updater: watches position and reports live distance
   // to the office, whether the user is inside the geofence, and accuracy status.
-  // officeLat/officeLon/radiusMeters come from the admin-configured geofence.
-  // onUpdate receives either an error object or a full status object every tick.
-  watchDistanceToOffice(officeLat, officeLon, radiusMeters, onUpdate) {
+  //
+  // options.minIntervalMs       — minimum time between updates (default: every fix)
+  // options.minMovementMeters   — emit early when the device moved at least this far
+  //
+  // A sample is emitted when either the interval elapsed or the movement
+  // threshold was crossed, so a stationary device does not spam the UI and a
+  // walking employee still gets prompt updates.
+  watchDistanceToOffice(officeLat, officeLon, radiusMeters, onUpdate, options = {}) {
     if (!("geolocation" in navigator)) {
-      onUpdate({ error: "Geolocation is not supported by your browser or device." });
+      onUpdate({ error: "Geolocation is not supported by your browser or device.", code: null });
       return null;
     }
+
+    const minIntervalMs = Number(options.minIntervalMs) || 0;
+    const minMovementMeters = Number(options.minMovementMeters) || 0;
+    let lastEmitAt = 0;
+    let lastLat = null;
+    let lastLon = null;
 
     return navigator.geolocation.watchPosition(
       position => {
         const { latitude, longitude, accuracy } = position.coords;
-        const distance = this.calculateDistance(latitude, longitude, officeLat, officeLon);
+        const now = Date.now();
 
+        if (lastLat !== null) {
+          const elapsed = now - lastEmitAt;
+          const moved = this.calculateDistance(latitude, longitude, lastLat, lastLon);
+          if (elapsed < minIntervalMs && moved < minMovementMeters) return;
+        }
+
+        lastEmitAt = now;
+        lastLat = latitude;
+        lastLon = longitude;
+
+        const distance = this.calculateDistance(latitude, longitude, officeLat, officeLon);
         onUpdate({
           latitude,
           longitude,
           accuracy: Math.round(accuracy),
+          timestamp: position.timestamp,
           distance,
           isInside: distance <= radiusMeters,
           lowAccuracy: accuracy > ACCURACY_WARNING_THRESHOLD_M
         });
       },
-      error => onUpdate({ error: mapGeoError(error) }),
+      error => onUpdate({ error: mapGeoError(error), code: error.code }),
       GEO_OPTIONS
     );
   }
