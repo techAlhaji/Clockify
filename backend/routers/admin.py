@@ -35,6 +35,33 @@ router = APIRouter(prefix="/api/admin", tags=["Admin"])
 # Geofence configuration
 # ---------------------------------------------------------------------------
 
+# Audit log for geofence changes
+# ---------------------------------------------------------------------------
+
+# Ensure audit_log table exists (SQLite migration)
+conn = get_db()
+cr = conn.cursor()
+cr.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='geofence_audit'"
+)
+if not cr.fetchone():
+    cr.execute("""
+        CREATE TABLE geofence_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor_id INTEGER NOT NULL,
+            old_latitude DOUBLE PRECISION,
+            old_longitude DOUBLE PRECISION,
+            old_radius_meters DOUBLE PRECISION,
+            old_work_start_time TEXT,
+            new_latitude DOUBLE PRECISION NOT NULL,
+            new_longitude DOUBLE PRECISION NOT NULL,
+            new_radius_meters DOUBLE PRECISION NOT NULL,
+            new_work_start_time TEXT NOT NULL,
+            changed_at TEXT NOT NULL,
+            actor_ip TEXT
+        )""")
+conn.close()
+
 @router.get("/geofence")
 def get_geofence():
     """Retrieve current active workplace geofence coordinates and radius."""
@@ -51,11 +78,17 @@ def get_geofence():
 
 
 @router.put("/geofence", dependencies=[Depends(require_admin)])
-def update_geofence(payload: GeofenceUpdate):
+def update_geofence(payload: GeofenceUpdate, if_match: Optional[str] = Header(None)):
     """
     Update the active workplace coordinates, radius and shift start time.
     Changes take effect immediately — clock-in/out validation reads the
     latest saved settings on every request.
+
+    If-Match header protection: the request is rejected if the geofence
+    version on the server has changed since the caller last read it.
+    This prevents two admins from clobbering each other's changes.
+
+    The actor's IP and admin user ID are recorded for audit purposes.
     """
     # Validate shift start time format (24h HH:MM)
     work_start_time = payload.work_start_time or "09:00"
@@ -69,25 +102,30 @@ def update_geofence(payload: GeofenceUpdate):
 
     conn = get_db()
     cursor = conn.cursor()
-    now = get_now().isoformat()
 
-    cursor.execute("""
-        UPDATE geofence_settings
-        SET name = ?,
-            latitude = ?,
-            longitude = ?,
-            radius_meters = ?,
-            work_start_time = ?,
-            updated_at = ?
-        WHERE id = (SELECT id FROM geofence_settings ORDER BY id DESC LIMIT 1)
-    """, (
-        payload.name or "Workplace Headquarters",
-        payload.latitude,
-        payload.longitude,
-        payload.radius_meters,
-        work_start_time,
-        now
-    ))
+    # Read the current geofence row and its version for If-Match and audit
+    cursor.execute(
+        "SELECT id, latitude, longitude, radius_meters, work_start_time, updated_at FROM geofence_settings ORDER BY id DESC LIMIT 1"
+    )
+    current = cursor.fetchone()
+
+    if not current:
+        raise HTTPException(status_code=404, detail="No geofence settings configured")
+
+    # If-Match: compare the server's version stamp with the client-supplied one
+    if if_match and if_match != str(current["updated_at"]):
+        raise HTTPException(
+            status_code=412,
+            detail="Geofence has been modified since you last read it. Please reload and try again."
+        )
+
+    # Record old values for audit
+    old_lat = current["latitude"]
+    old_lon = current["longitude"]
+    old_rad = current["radius_meters"]
+    old_start = current["work_start_time"]
+
+    now = get_now().isoformat()
 
     # If no settings row existed yet, seed the first configuration (CRUD upsert)
     if cursor.rowcount == 0:
@@ -103,7 +141,43 @@ def update_geofence(payload: GeofenceUpdate):
             work_start_time,
             now
         ))
+    else:
+        cursor.execute(
+            """
+            UPDATE geofence_settings
+            SET name = ?,
+                latitude = ?,
+                longitude = ?,
+                radius_meters = ?,
+                work_start_time = ?,
+                updated_at = ?
+            WHERE id = (SELECT id FROM geofence_settings ORDER BY id DESC LIMIT 1)
+        """, (
+            payload.name or "Workplace Headquarters",
+            payload.latitude,
+            payload.longitude,
+            payload.radius_meters,
+            work_start_time,
+            now
+        ))
 
+    # Audit log entry
+    from backend.routers.auth import get_stored_admin_user, request as req_module
+    actor_id = int(get_stored_admin_user().get("id", 0)) if get_stored_admin_user() else 0
+    actor_ip = req_module.remote_addr or "unknown"
+    cr = conn.cursor()
+    cr.execute(
+        """
+            INSERT INTO geofence_audit
+                (actor_id, old_latitude, old_longitude, old_radius_meters,
+                 old_work_start_time, new_latitude, new_longitude, new_radius_meters,
+                 new_work_start_time, changed_at, actor_ip)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            actor_id, old_lat, old_lon, old_rad, old_start,
+            payload.latitude, payload.longitude, payload.radius_meters,
+            work_start_time, now, actor_ip
+        ))
     conn.commit()
 
     cursor.execute("SELECT * FROM geofence_settings ORDER BY id DESC LIMIT 1")
@@ -113,7 +187,8 @@ def update_geofence(payload: GeofenceUpdate):
     return {
         "status": "success",
         "message": "Workplace geofence successfully updated",
-        "geofence": GeofenceModel.to_dict(row)
+        "geofence": GeofenceModel.to_dict(row),
+        "version": row["updated_at"]
     }
 
 
