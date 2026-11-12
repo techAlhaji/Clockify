@@ -21,6 +21,7 @@ const elements = {
   digitalClock:        document.getElementById('digitalClock'),
   dateDisplay:         document.getElementById('dateDisplay'),
 
+  
   // Auth Gates & Dashboard Container
   employeeLoginGate:   document.getElementById('employeeLoginGate'),
   employeeDashboard:   document.getElementById('employeeDashboard'),
@@ -45,6 +46,10 @@ const elements = {
   radarWrapEl:   document.getElementById('radarWrapEl'),
   radarDot:      document.getElementById('radarDot'),
   btnRefreshLocation: document.getElementById('btnRefreshLocation'),
+  distanceValue: document.getElementById('distanceValue'),
+  distanceSub:   document.getElementById('distanceSub'),
+  radarWrapEl:   document.getElementById('radarWrapEl'),
+  radarDot:      document.getElementById('radarDot'),
 
   // Action Button
   btnAction:      document.getElementById('btnAction'),
@@ -126,6 +131,7 @@ async function showPersonalDashboard() {
   renderEmployeeProfile();
   await refreshShiftData();
   startLocationWatch();
+  queryLiveLocation();
 }
 
 // Show Login Gate when unauthenticated
@@ -209,6 +215,7 @@ async function refreshShiftData() {
   if (!AppState.currentEmployee) return;
   const employee = AppState.currentEmployee;
   const empId = employee.id;
+  const empId = AppState.currentEmployee.id;
   const today = getLocalDateString();
 
   try {
@@ -231,6 +238,7 @@ async function refreshShiftData() {
 
     const historyData = await ApiClient.getHistory(empId);
     if (employee !== AppState.currentEmployee) return;
+    const historyData = await ApiClient.getHistory(empId);
     renderHistory(historyData);
   } catch (err) {
     console.error("Failed to refresh shift:", err);
@@ -617,6 +625,12 @@ async function refreshLocation({ quiet = false } = {}) {
   clearLocationWatch();
   const seq = ++geoRequestSeq;
   showGeoLocating(quiet ? "Checking GPS…" : "Refreshing GPS…");
+}
+
+// Query Live Location & Update Radar
+async function queryLiveLocation() {
+  elements.statusBadge.className = 'status-pill pill-checking';
+  elements.statusBadge.innerHTML = '<span class="pill-dot"></span> Locating GPS…';
 
   try {
     const loc = await GeoService.getCurrentPosition();
@@ -686,6 +700,10 @@ function handleWindowFocus() {
     refreshLocation({ quiet: true });
   } else if (geoWatchId === null) {
     startLocationWatch({ silent: true });
+    elements.statusBadge.className = 'status-pill pill-outside';
+    elements.statusBadge.innerHTML = '<span class="pill-dot"></span> GPS Offline';
+    elements.distanceValue.textContent = 'GPS Error';
+    elements.distanceSub.textContent   = err.message;
   }
 }
 
@@ -721,6 +739,21 @@ function updateDistanceRadar(lat, lon, accuracy) {
   } else {
     setGeoBadge("Outside Perimeter", "pill-outside");
     setGeoPulse("outside");
+  const dist     = GeoService.calculateDistance(lat, lon, AppState.workplace.latitude, AppState.workplace.longitude);
+  const radius   = AppState.workplace.radius_meters;
+  const isInside = dist <= radius;
+
+  elements.distanceValue.textContent = `${dist}m away`;
+  elements.distanceSub.textContent   = `${AppState.workplace.name} · Radius ${radius}m · GPS ±${accuracy}m`;
+
+  if (isInside) {
+    elements.statusBadge.className = 'status-pill pill-inside';
+    elements.statusBadge.innerHTML = '<span class="pill-dot"></span> Inside Workplace';
+    if (elements.radarWrapEl) elements.radarWrapEl.className = 'radar-wrap is-inside';
+    if (elements.radarDot)    elements.radarDot.className    = 'radar-user dot-inside';
+  } else {
+    elements.statusBadge.className = 'status-pill pill-outside';
+    elements.statusBadge.innerHTML = '<span class="pill-dot"></span> Outside Perimeter';
     if (elements.radarWrapEl) elements.radarWrapEl.className = 'radar-wrap is-outside';
     if (elements.radarDot)    elements.radarDot.className    = 'radar-user dot-outside';
   }
@@ -731,6 +764,7 @@ async function handleClockIn() {
   if (!AppState.currentEmployee) return;
   const employee = AppState.currentEmployee;
   const empId = employee.id;
+  const empId = AppState.currentEmployee.id;
   const today = getLocalDateString();
   const lock = getShiftLock(empId, today);
 
@@ -793,6 +827,7 @@ async function handleClockOut() {
   if (!AppState.currentEmployee) return;
   const employee = AppState.currentEmployee;
   const empId = employee.id;
+  const empId = AppState.currentEmployee.id;
   const today = getLocalDateString();
   const lock = getShiftLock(empId, today);
 
@@ -900,6 +935,7 @@ function setupEventListeners() {
         AppState.currentEmployee = res.employee;
         localStorage.setItem(STORAGE_AUTH_KEY, JSON.stringify(res.employee));
 
+        
         showToast(`Welcome, ${res.employee.name}!`, 'success');
         await showPersonalDashboard();
       } catch (err) {

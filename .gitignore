@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+env/
+ENV/
+
+# Local databases (auto-created and seeded by backend.database.init_db)
+*.db
+*.sqlite3
+
+# Environment / secrets
+.env
+
+# IDE & editor settings
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db

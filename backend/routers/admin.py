@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from backend.config import get_now, get_today_str, MAX_ALLOWED_GPS_ACCURACY_METERS
+from backend.config import get_now, get_today_str
 from backend.database import get_db
 from backend.models import GeofenceModel, AttendanceModel
 from backend.routers.auth import require_admin
@@ -50,6 +51,7 @@ def get_geofence():
     result = GeofenceModel.to_dict(row)
     result["max_allowed_accuracy_meters"] = MAX_ALLOWED_GPS_ACCURACY_METERS
     return result
+
 
 
 @router.put("/geofence", dependencies=[Depends(require_admin)])
