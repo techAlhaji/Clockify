@@ -294,7 +294,7 @@ def sync_shift(payload: SyncShiftRequest):
 
 
 @router.get("/history/{employee_id}")
-def get_employee_history(employee_id: int, limit: int = 10):
+def get_employee_history(employee_id: int, limit: int = Query(10, ge=1, le=100)):
     """
     Retrieves recent attendance history for the specified employee.
     """

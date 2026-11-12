@@ -50,21 +50,32 @@ const adminElements = {
   // Table & Filters
   filterDate: document.getElementById("filterDate"),
   searchEmployee: document.getElementById("searchEmployee"),
+  filterDepartment: document.getElementById("filterDepartment"),
+  filterStatus: document.getElementById("filterStatus"),
+  filterLateOnly: document.getElementById("filterLateOnly"),
   btnToggleAllDates: document.getElementById("btnToggleAllDates"),
   lblToggleAllDates: document.getElementById("lblToggleAllDates"),
   btnApplyFilters: document.getElementById("btnApplyFilters"),
   btnExportCsv: document.getElementById("btnExportCsv"),
   attendanceTableBody: document.getElementById("attendanceTableBody"),
+  recordCount: document.getElementById("recordCount"),
+  pagerInfo: document.getElementById("pagerInfo"),
+  btnPrevPage: document.getElementById("btnPrevPage"),
+  btnNextPage: document.getElementById("btnNextPage"),
 
   toastContainer: document.getElementById("toastContainer")
 };
 
 // State Variables
-let allRecords = [];
 let lastRenderedJson = "";
 let currentViewMode = localStorage.getItem(STORAGE_KEY_VIEW_MODE) || "roster"; // 'roster' (Today's all-staff live status) or 'history' (session log)
 let selectedFilterDate = "";
+let totalRecords = 0;
+let pageOffset = 0;
+let searchDebounce = null;
+let departmentsLoaded = false;
 let autoRefreshTimer = null;
+const PAGE_SIZE = 25;
 const AUTO_REFRESH_INTERVAL_MS = 5000;
 
 function getLocalDateString(d = new Date()) {
@@ -92,10 +103,14 @@ function getStoredAdminUser() {
 async function initAdmin() {
   setupAdminListeners();
 
+  if (currentViewMode !== "roster" && currentViewMode !== "history") {
+    currentViewMode = "roster";
+  }
+
   const today = getLocalDateString();
-  selectedFilterDate = today;
+  selectedFilterDate = currentViewMode === "history" ? "" : today;
   if (adminElements.filterDate) {
-    adminElements.filterDate.value = today;
+    adminElements.filterDate.value = selectedFilterDate;
   }
 
   updateToggleViewButtonUI();
@@ -115,6 +130,7 @@ async function initAdmin() {
   // Token exists, attempt to load dashboard data
   try {
     showAdminDashboardUI();
+    await loadDepartmentOptions();
     await refreshAllDashboardData();
     startLivePolling();
   } catch (err) {
@@ -172,28 +188,12 @@ function showAdminDashboardUI() {
 // Fetch Metrics, Geofence, and Records
 async function refreshAllDashboardData(silent = false) {
   try {
-    let metricsDate = "today";
-    let recordsDate = null;
-    let viewParam = "roster";
-
-    if (currentViewMode === "roster") {
-      metricsDate = selectedFilterDate || "today";
-      recordsDate = selectedFilterDate || "today";
-      viewParam = "roster";
-    } else if (currentViewMode === "history") {
-      metricsDate = "today";
-      recordsDate = null;
-      viewParam = "history";
-    } else if (currentViewMode === "custom_date") {
-      metricsDate = selectedFilterDate;
-      recordsDate = selectedFilterDate;
-      viewParam = "roster";
-    }
+    const metricsDate = selectedFilterDate || "today";
 
     await Promise.all([
       loadMetrics(metricsDate),
       loadGeofenceSettings(),
-      loadAttendanceRecords(recordsDate, viewParam)
+      loadAttendanceRecords()
     ]);
 
     // Visual pulse on live sync pill
@@ -270,20 +270,101 @@ async function loadGeofenceSettings() {
   }
 }
 
-// Load Attendance Records with View Parameter
-async function loadAttendanceRecords(date, view = "roster") {
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[ch]));
+}
+
+function getFilterState() {
+  return {
+    search: adminElements.searchEmployee ? adminElements.searchEmployee.value.trim() : "",
+    department: adminElements.filterDepartment ? adminElements.filterDepartment.value : "",
+    status: adminElements.filterStatus ? adminElements.filterStatus.value : "",
+    lateOnly: adminElements.filterLateOnly ? adminElements.filterLateOnly.checked : false
+  };
+}
+
+async function loadDepartmentOptions() {
+  if (departmentsLoaded || !adminElements.filterDepartment) return;
   try {
-    allRecords = await ApiClient.getAdminRecords(date, null, view);
-    const term = adminElements.searchEmployee ? adminElements.searchEmployee.value.trim().toLowerCase() : "";
-    if (term) {
-      filterAndRenderRecords(term);
-    } else {
-      renderAttendanceTable(allRecords);
+    const employees = await ApiClient.getEmployees();
+    const current = adminElements.filterDepartment.value;
+    const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b));
+    adminElements.filterDepartment.innerHTML =
+      '<option value="">All departments</option>' +
+      departments.map((d) => `<option value="${escapeHtml(d)}">${escapeHtml(d)}</option>`).join("");
+    adminElements.filterDepartment.value = current;
+    departmentsLoaded = true;
+  } catch (err) {
+    console.error("Failed to load departments:", err);
+  }
+}
+
+// Load Attendance Records: filters, date and pagination are all resolved server-side
+async function loadAttendanceRecords({ retry = true } = {}) {
+  try {
+    const filters = getFilterState();
+    const searching = filters.search.length > 0;
+
+    const data = await ApiClient.getAdminRecords({
+      view: searching ? "history" : currentViewMode,
+      date: searching ? null : (selectedFilterDate || null),
+      search: filters.search || null,
+      department: filters.department || null,
+      status: filters.status || null,
+      lateOnly: filters.lateOnly,
+      limit: PAGE_SIZE,
+      offset: pageOffset
+    });
+
+    const records = Array.isArray(data) ? data : (data.records || []);
+    totalRecords = Array.isArray(data) ? records.length : (data.total || 0);
+
+    // A filter can shrink the result set below the current page.
+    if (records.length === 0 && pageOffset > 0 && totalRecords > 0 && retry) {
+      pageOffset = Math.max(0, (Math.ceil(totalRecords / PAGE_SIZE) - 1) * PAGE_SIZE);
+      return loadAttendanceRecords({ retry: false });
     }
+
+    renderAttendanceTable(records);
+    updatePager();
   } catch (err) {
     console.error("Failed to load records:", err);
     throw err;
   }
+}
+
+function updatePager() {
+  const pages = Math.max(1, Math.ceil(totalRecords / PAGE_SIZE));
+  const page = Math.floor(pageOffset / PAGE_SIZE) + 1;
+  const searching = getFilterState().search.length > 0;
+
+  if (adminElements.recordCount) {
+    if (!totalRecords) {
+      adminElements.recordCount.textContent = "No records for this view";
+    } else if (searching) {
+      adminElements.recordCount.textContent = `${totalRecords} match${totalRecords === 1 ? "" : "es"} across all dates`;
+    } else {
+      adminElements.recordCount.textContent = `${totalRecords} entr${totalRecords === 1 ? "y" : "ies"}`;
+    }
+  }
+
+  if (adminElements.pagerInfo) {
+    adminElements.pagerInfo.textContent = totalRecords
+      ? `Page ${page} of ${pages} · showing ${pageOffset + 1}–${Math.min(pageOffset + PAGE_SIZE, totalRecords)} of ${totalRecords}`
+      : "Nothing to show";
+  }
+
+  if (adminElements.btnPrevPage) adminElements.btnPrevPage.disabled = pageOffset === 0;
+  if (adminElements.btnNextPage) adminElements.btnNextPage.disabled = pageOffset + PAGE_SIZE >= totalRecords;
+}
+
+function resetAndLoadRecords() {
+  pageOffset = 0;
+  lastRenderedJson = "";
+  return loadAttendanceRecords();
 }
 
 // Zero-Flicker Table Renderer with Complete All-Staff Status
@@ -306,9 +387,11 @@ function renderAttendanceTable(records) {
   lastRenderedJson = newJson;
 
   if (!records || records.length === 0) {
-    const subText = currentViewMode === "history"
-      ? "No historical clock-in / clock-out events found in the database."
-      : "No staff records found for the selected view.";
+    const subText = getFilterState().search
+      ? "No records match this search. Try another name, staff ID or filter."
+      : currentViewMode === "history"
+        ? "No historical clock-in / clock-out events found in the database."
+        : "No staff records found for the selected view.";
 
     adminElements.attendanceTableBody.innerHTML = `
       <tr><td colspan="7">
@@ -383,21 +466,6 @@ function renderAttendanceTable(records) {
   }).join('');
 }
 
-function filterAndRenderRecords(term) {
-  if (!term) {
-    renderAttendanceTable(allRecords);
-    return;
-  }
-  const filtered = allRecords.filter(r => {
-    const name = (r.name || r.employee_name || '').toLowerCase();
-    const dept = (r.department || '').toLowerCase();
-    const staffId = (r.staff_id || '').toLowerCase();
-    const notes = (r.notes || '').toLowerCase();
-    return name.includes(term) || dept.includes(term) || staffId.includes(term) || notes.includes(term);
-  });
-  renderAttendanceTable(filtered);
-}
-
 // Live Polling (Multi-device real-time sync)
 function startLivePolling() {
   stopLivePolling();
@@ -456,6 +524,7 @@ function setupAdminListeners() {
         localStorage.setItem(STORAGE_KEY_ADMIN_USER, JSON.stringify(user));
 
         showAdminDashboardUI();
+        await loadDepartmentOptions();
         await refreshAllDashboardData();
         startLivePolling();
         showToast(`Welcome back, ${user.name || "Lead Tech"}! Exclusive console unlocked.`, "success");
@@ -593,58 +662,92 @@ function setupAdminListeners() {
     adminElements.btnToggleAllDates.addEventListener("click", async () => {
       if (currentViewMode === "roster") {
         currentViewMode = "history";
+        selectedFilterDate = "";
       } else {
         currentViewMode = "roster";
         selectedFilterDate = getLocalDateString();
-        if (adminElements.filterDate) adminElements.filterDate.value = selectedFilterDate;
       }
+      if (adminElements.filterDate) adminElements.filterDate.value = selectedFilterDate;
       localStorage.setItem(STORAGE_KEY_VIEW_MODE, currentViewMode);
       updateToggleViewButtonUI();
-      lastRenderedJson = ""; // force fresh render
+      lastRenderedJson = "";
+      pageOffset = 0;
       await refreshAllDashboardData();
     });
   }
 
-  // Apply Date Filter
+  // Apply the selected date; the view mode is owned by the toggle above
   if (adminElements.btnApplyFilters) {
     adminElements.btnApplyFilters.addEventListener("click", async () => {
       const chosen = adminElements.filterDate ? adminElements.filterDate.value : "";
-      if (chosen) {
-        selectedFilterDate = chosen;
-        currentViewMode = "custom_date";
-        if (adminElements.lblToggleAllDates) adminElements.lblToggleAllDates.textContent = "📅 Today's Live Roster";
-        if (adminElements.btnToggleAllDates) {
-          adminElements.btnToggleAllDates.classList.remove("btn-primary");
-          adminElements.btnToggleAllDates.classList.add("btn-ghost");
-        }
-      } else {
-        currentViewMode = "roster";
+      selectedFilterDate = chosen;
+      if (currentViewMode === "roster" && !selectedFilterDate) {
         selectedFilterDate = getLocalDateString();
-        updateToggleViewButtonUI();
+        if (adminElements.filterDate) adminElements.filterDate.value = selectedFilterDate;
       }
       lastRenderedJson = "";
+      pageOffset = 0;
       await refreshAllDashboardData();
-      showToast(`Showing attendance records for ${selectedFilterDate}`, "info");
+      showToast(
+        selectedFilterDate ? `Showing attendance records for ${selectedFilterDate}` : "Showing history across all dates",
+        "info"
+      );
     });
   }
 
-  // Search Filter by Name, Dept, or Staff ID
+  // Search spans the whole database; filters and paging stay server-side
   if (adminElements.searchEmployee) {
-    adminElements.searchEmployee.addEventListener("input", (e) => {
-      filterAndRenderRecords(e.target.value.trim().toLowerCase());
+    adminElements.searchEmployee.addEventListener("input", () => {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(() => {
+        resetAndLoadRecords().catch((err) => showToast(err.message, "error"));
+      }, 300);
     });
   }
 
-  // Export CSV with attached token for authenticated download
+  [adminElements.filterDepartment, adminElements.filterStatus, adminElements.filterLateOnly].forEach((el) => {
+    if (!el) return;
+    el.addEventListener("change", () => {
+      resetAndLoadRecords().catch((err) => showToast(err.message, "error"));
+    });
+  });
+
+  if (adminElements.btnPrevPage) {
+    adminElements.btnPrevPage.addEventListener("click", () => {
+      if (pageOffset === 0) return;
+      pageOffset = Math.max(0, pageOffset - PAGE_SIZE);
+      lastRenderedJson = "";
+      loadAttendanceRecords().catch((err) => showToast(err.message, "error"));
+    });
+  }
+
+  if (adminElements.btnNextPage) {
+    adminElements.btnNextPage.addEventListener("click", () => {
+      if (pageOffset + PAGE_SIZE >= totalRecords) return;
+      pageOffset += PAGE_SIZE;
+      lastRenderedJson = "";
+      loadAttendanceRecords().catch((err) => showToast(err.message, "error"));
+    });
+  }
+
+  // Export CSV with the active filters and an attached token
   if (adminElements.btnExportCsv) {
     adminElements.btnExportCsv.addEventListener("click", () => {
-      const date = (currentViewMode === "roster" || currentViewMode === "custom_date") ? (selectedFilterDate || "today") : null;
+      const filters = getFilterState();
       const token = getStoredAdminToken();
       const params = new URLSearchParams();
       if (token) params.append("token", token);
-      if (date) params.append("date", date);
-      const url = `${window.location.origin}/api/admin/export/csv?${params.toString()}`;
-      window.open(url, "_blank");
+      if (filters.search) {
+        params.append("search", filters.search);
+      } else if (selectedFilterDate) {
+        params.append("date", selectedFilterDate);
+      }
+      if (filters.department) params.append("department", filters.department);
+      if (filters.status === "CLOCKED_IN" || filters.status === "CLOCKED_OUT") {
+        params.append("status", filters.status);
+      }
+      if (filters.lateOnly) params.append("late_only", "true");
+      window.open(`${window.location.origin}/api/admin/export/csv?${params.toString()}`, "_blank");
     });
   }
 
@@ -656,7 +759,13 @@ function setupAdminListeners() {
         showToast("Demo attendance records seeded across all 10 employees for today!", "success");
         currentViewMode = "roster";
         selectedFilterDate = getLocalDateString();
+        if (adminElements.filterDate) adminElements.filterDate.value = selectedFilterDate;
+        if (adminElements.searchEmployee) adminElements.searchEmployee.value = "";
+        if (adminElements.filterDepartment) adminElements.filterDepartment.value = "";
+        if (adminElements.filterStatus) adminElements.filterStatus.value = "";
+        if (adminElements.filterLateOnly) adminElements.filterLateOnly.checked = false;
         updateToggleViewButtonUI();
+        pageOffset = 0;
         lastRenderedJson = "";
         await refreshAllDashboardData();
       } catch (err) {
