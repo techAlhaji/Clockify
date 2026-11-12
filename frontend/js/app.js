@@ -20,6 +20,7 @@ const STORAGE_AUTH_KEY = "clockify_authenticated_employee";
 const elements = {
   digitalClock:        document.getElementById('digitalClock'),
   dateDisplay:         document.getElementById('dateDisplay'),
+
   
   // Auth Gates & Dashboard Container
   employeeLoginGate:   document.getElementById('employeeLoginGate'),
@@ -38,6 +39,13 @@ const elements = {
 
   // Radar / Status — new v3 IDs
   statusBadge:   document.getElementById('statusBadge'),
+  statusPulse:   document.getElementById('statusPulse'),
+  distanceValue: document.getElementById('distanceValue'),
+  distanceSub:   document.getElementById('distanceSub'),
+  radarFreshness: document.getElementById('radarFreshness'),
+  radarWrapEl:   document.getElementById('radarWrapEl'),
+  radarDot:      document.getElementById('radarDot'),
+  btnRefreshLocation: document.getElementById('btnRefreshLocation'),
   distanceValue: document.getElementById('distanceValue'),
   distanceSub:   document.getElementById('distanceSub'),
   radarWrapEl:   document.getElementById('radarWrapEl'),
@@ -56,6 +64,22 @@ const elements = {
   historyCount:  document.getElementById('historyCount'),
   toastContainer: document.getElementById('toastContainer')
 };
+
+// Live geofence radar tuning
+const GEO_EMIT_INTERVAL_MS = 30000;
+const GEO_MOVE_THRESHOLD_M = 25;
+const GEO_STALE_AFTER_MS = 90000;
+const GEO_FRESHNESS_TICK_MS = 5000;
+
+let geoWatchId = null;
+let geoRequestSeq = 0;
+let geoFreshnessTimer = null;
+let geoLastFixAt = 0;
+let geoState = "idle";
+let geoRefreshInFlight = false;
+let geoRefreshGeneration = 0;
+let geoLifecycleGeneration = 0;
+let geoError = null;
 
 // Initialize Application
 async function init() {
@@ -106,6 +130,7 @@ async function showPersonalDashboard() {
 
   renderEmployeeProfile();
   await refreshShiftData();
+  startLocationWatch();
   queryLiveLocation();
 }
 
@@ -114,6 +139,7 @@ function showLoginGate() {
   if (elements.employeeLoginGate) elements.employeeLoginGate.style.display = 'block';
   if (elements.employeeDashboard) elements.employeeDashboard.style.display = 'none';
   AppState.currentEmployee = null;
+  stopLocationWatch("signedOut");
 }
 
 // Live Digital Clock
@@ -137,7 +163,7 @@ function renderEmployeeProfile() {
   if (!AppState.currentEmployee) return;
   elements.employeeName.textContent = AppState.currentEmployee.name;
   elements.employeeDept.textContent = `${AppState.currentEmployee.department} • ${AppState.currentEmployee.staff_id}`;
-  
+
   const initials = AppState.currentEmployee.name
     .split(" ")
     .map(n => n[0])
@@ -187,11 +213,14 @@ function saveShiftLock(employeeId, status, record, dateStr = getLocalDateString(
 // cache for the current day's UI state.
 async function refreshShiftData() {
   if (!AppState.currentEmployee) return;
+  const employee = AppState.currentEmployee;
+  const empId = employee.id;
   const empId = AppState.currentEmployee.id;
   const today = getLocalDateString();
 
   try {
     const statusData = await ApiClient.getStatus(empId);
+    if (employee !== AppState.currentEmployee) return;
 
     AppState.shiftStatus = statusData.status;
     AppState.todayRecord = statusData.record;
@@ -203,6 +232,12 @@ async function refreshShiftData() {
     updateActionControls();
     updateTodaySummary();
 
+    if (AppState.shiftStatus === "CLOCKED_OUT") {
+      stopLocationWatch("complete");
+    }
+
+    const historyData = await ApiClient.getHistory(empId);
+    if (employee !== AppState.currentEmployee) return;
     const historyData = await ApiClient.getHistory(empId);
     renderHistory(historyData);
   } catch (err) {
@@ -286,16 +321,385 @@ function renderHistory(records) {
   }).join('');
 }
 
+// ---------------------------------------------------------------------------
+// Live geofence radar
+// ---------------------------------------------------------------------------
+
+// Each call returns a frozen snapshot; consumers cannot mutate app state.
+function getLocationSnapshot() {
+  const sample = AppState.currentLocation;
+  const ageMs = sample ? Math.max(0, Date.now() - sample.timestamp) : null;
+  const fresh = geoState === "live" && ageMs !== null && ageMs < GEO_STALE_AFTER_MS;
+  return Object.freeze({
+    sample: sample ? Object.freeze({ ...sample }) : null,
+    state: geoState, error: geoError, ageMs, fresh,
+    verifiedPresence: fresh && sample.isInside
+  });
+}
+
+function publishLocationState() {
+  window.dispatchEvent(new CustomEvent("clockify:location-update", { detail: getLocationSnapshot() }));
+}
+
+window.ClockifyLocation = Object.freeze({ getSnapshot: getLocationSnapshot });
+
+function resetRadarPosition() {
+  if (elements.radarWrapEl) elements.radarWrapEl.className = "radar-wrap";
+  if (elements.radarDot) elements.radarDot.className = "radar-user";
+}
+
+function setGeoBadge(label, pillClass) {
+  if (!elements.statusBadge) return;
+  elements.statusBadge.className = `status-pill ${pillClass}`;
+  elements.statusBadge.innerHTML = `<span class="pill-dot"></span> ${escapeHtml(label)}`;
+}
+
+function setGeoPulse(stateClass) {
+  if (!elements.statusPulse) return;
+  elements.statusPulse.className = stateClass
+    ? `pulse-indicator ${stateClass}`
+    : "pulse-indicator";
+}
+
+function formatFixAge(ms) {
+  if (!Number.isFinite(ms) || ms < 5000) return "just now";
+  if (ms < 60000) return `${Math.round(ms / 1000)}s`;
+  const minutes = Math.floor(ms / 60000);
+  const seconds = Math.round((ms % 60000) / 1000);
+  return seconds ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
+function renderGeoFreshness() {
+  const el = elements.radarFreshness;
+  if (!el) return;
+  el.classList.remove("is-stale", "is-error");
+
+  if (geoState === "denied") {
+    el.textContent = "Live tracking stopped — location permission denied";
+    el.classList.add("is-error");
+    return;
+  }
+  if (geoState === "paused") {
+    el.textContent = "Live tracking paused while this tab is hidden";
+    el.classList.add("is-stale");
+    return;
+  }
+  if (geoState === "signedOut" || geoState === "idle") {
+    el.textContent = "No live location tracking";
+    return;
+  }
+  if (geoState === "complete") {
+    el.textContent = "Live tracking stopped — shift complete";
+    return;
+  }
+  if (!geoLastFixAt) {
+    if (geoState === "stale") {
+      el.textContent = "No GPS fix yet — retrying automatically";
+      el.classList.add("is-stale");
+    } else {
+      el.textContent = "Waiting for the first GPS fix…";
+    }
+    return;
+  }
+
+  const age = Math.max(0, Date.now() - geoLastFixAt);
+  if (geoState === "stale") {
+    el.textContent = `Signal lost — last GPS fix ${formatFixAge(age)} ago`;
+    el.classList.add("is-stale");
+    return;
+  }
+
+  const isStale = age >= GEO_STALE_AFTER_MS;
+  el.textContent = `Last GPS fix ${formatFixAge(age)} ago${isStale ? " · stale" : ""}`;
+  if (isStale) {
+    el.classList.add("is-stale");
+    geoState = "stale";
+    setGeoBadge("GPS Stale", "pill-stale");
+    setGeoPulse("outside");
+    resetRadarPosition();
+    publishLocationState();
+  }
+}
+
+function startGeoFreshnessTicker() {
+  if (geoFreshnessTimer !== null) return;
+  geoFreshnessTimer = setInterval(renderGeoFreshness, GEO_FRESHNESS_TICK_MS);
+  renderGeoFreshness();
+}
+
+function clearLocationWatch() {
+  geoRequestSeq += 1;
+  if (geoWatchId !== null) {
+    GeoService.clearWatch(geoWatchId);
+  }
+  geoWatchId = null;
+  if (geoFreshnessTimer !== null) {
+    clearInterval(geoFreshnessTimer);
+    geoFreshnessTimer = null;
+  }
+}
+
+function showGeoLocating(message = "Locating GPS…") {
+  geoState = "locating";
+  setGeoBadge("Locating GPS…", "pill-checking");
+  setGeoPulse("");
+  if (!geoLastFixAt) {
+    elements.distanceValue.textContent = "Calculating…";
+    elements.distanceSub.textContent = "Acquiring device satellite position…";
+  }
+  if (elements.radarWrapEl) elements.radarWrapEl.className = "radar-wrap";
+  if (elements.radarFreshness) {
+    elements.radarFreshness.textContent = message;
+    elements.radarFreshness.classList.remove("is-stale", "is-error");
+  }
+}
+
+function applyGeoFix(loc) {
+  if (!loc || !Number.isFinite(loc.latitude) || !Number.isFinite(loc.longitude)) return;
+  if (!AppState.currentEmployee || document.hidden || AppState.shiftStatus === "CLOCKED_OUT") return;
+
+  geoLastFixAt = Number(loc.timestamp) || Date.now();
+  geoState = "live";
+  geoError = null;
+  AppState.currentLocation = Object.freeze({ ...loc, timestamp: geoLastFixAt,
+    ...GeoService.verifyGeofence(loc.latitude, loc.longitude, AppState.workplace.latitude,
+      AppState.workplace.longitude, AppState.workplace.radius_meters, loc.accuracy,
+      AppState.workplace.max_allowed_accuracy_meters)
+  });
+  updateDistanceRadar(loc.latitude, loc.longitude, loc.accuracy);
+  renderGeoFreshness();
+  publishLocationState();
+}
+
+function applyGeoFailure(errLike) {
+  const message = typeof errLike === "string"
+    ? errLike
+    : (errLike && errLike.message) || "Unable to retrieve device location.";
+  const code = errLike && typeof errLike === "object" ? errLike.code : undefined;
+  geoError = message;
+  resetRadarPosition();
+  const denied = code === 1 || /denied|permission/i.test(message);
+
+  if (denied) {
+    clearLocationWatch();
+    geoState = "denied";
+    setGeoBadge("GPS Denied", "pill-denied");
+    setGeoPulse("outside");
+    if (elements.radarWrapEl) elements.radarWrapEl.className = "radar-wrap is-denied";
+    elements.distanceValue.textContent = "Location off";
+    elements.distanceSub.textContent =
+      `${message} Allow location access for this site in your browser settings, then choose Retry location.`;
+    renderGeoFreshness();
+    publishLocationState();
+    return;
+  }
+
+  geoState = "stale";
+  setGeoBadge("GPS Stale", "pill-stale");
+  setGeoPulse("outside");
+  if (!geoLastFixAt) {
+    elements.distanceValue.textContent = "GPS Unavailable";
+    elements.distanceSub.textContent = `${message} Retrying automatically…`;
+  } else {
+    elements.distanceSub.textContent =
+      `${message} Showing the last known position while we retry.`;
+  }
+  renderGeoFreshness();
+  publishLocationState();
+}
+
+function handleGeoSample(sample) {
+  if (!sample) return;
+  if (sample.error) {
+    applyGeoFailure({ message: sample.error, code: sample.code });
+    return;
+  }
+  applyGeoFix({
+    latitude: sample.latitude,
+    longitude: sample.longitude,
+    accuracy: sample.accuracy,
+    timestamp: sample.timestamp || Date.now()
+  });
+}
+
+function startLocationWatch({ force = false, silent = false } = {}) {
+  if (!AppState.currentEmployee || !AppState.workplace) return;
+
+  if (document.hidden) {
+    stopLocationWatch("paused");
+    return;
+  }
+  if (AppState.shiftStatus === "CLOCKED_OUT") {
+    stopLocationWatch("complete");
+    return;
+  }
+  if (geoWatchId !== null) {
+    if (!force) return;
+    clearLocationWatch();
+  }
+
+  if (elements.btnRefreshLocation) elements.btnRefreshLocation.disabled = false;
+  if (!silent) showGeoLocating();
+
+  const seq = ++geoRequestSeq;
+  const watchId = GeoService.watchDistanceToOffice(
+    AppState.workplace.latitude,
+    AppState.workplace.longitude,
+    AppState.workplace.radius_meters,
+    (sample) => {
+      if (seq !== geoRequestSeq) return;
+      handleGeoSample(sample);
+    },
+    {
+      minIntervalMs: GEO_EMIT_INTERVAL_MS,
+      minMovementMeters: GEO_MOVE_THRESHOLD_M,
+      maxAccuracy: AppState.workplace.max_allowed_accuracy_meters
+    }
+  );
+
+  if (geoState === "denied") {
+    if (watchId !== null) GeoService.clearWatch(watchId);
+    return;
+  }
+
+  geoWatchId = watchId;
+  if (watchId !== null) {
+    startGeoFreshnessTicker();
+  } else if (seq === geoRequestSeq) {
+    applyGeoFailure("Geolocation is not supported by this browser or device.");
+  }
+}
+
+function stopLocationWatch(nextState = "idle") {
+  clearLocationWatch();
+  geoLifecycleGeneration += 1;
+  geoRefreshGeneration += 1;
+  geoRefreshInFlight = false;
+  if (elements.btnRefreshLocation) {
+    elements.btnRefreshLocation.disabled = nextState === "complete" || nextState === "signedOut";
+    elements.btnRefreshLocation.classList.remove("is-spinning");
+  }
+  resetRadarPosition();
+  geoState = nextState;
+
+  if (nextState === "signedOut") {
+    geoLastFixAt = 0;
+    geoError = null;
+    AppState.currentLocation = null;
+    setGeoBadge("GPS Idle", "pill-checking");
+    setGeoPulse("");
+    if (elements.radarWrapEl) elements.radarWrapEl.className = "radar-wrap";
+    elements.distanceValue.textContent = "—";
+    elements.distanceSub.textContent = "Sign in to verify your location.";
+  } else if (nextState === "paused") {
+    setGeoBadge("Tracking Paused", "pill-stale");
+    setGeoPulse("");
+  } else if (nextState === "complete") {
+    setGeoBadge("Shift Complete", "pill-checking");
+    setGeoPulse("");
+    if (AppState.workplace) {
+      elements.distanceSub.textContent =
+        `${AppState.workplace.name} · live location tracking stopped after clock-out`;
+    }
+  }
+  renderGeoFreshness();
+  publishLocationState();
+}
+
+async function refreshLocation({ quiet = false } = {}) {
+  if (!AppState.currentEmployee || !AppState.workplace || document.hidden || geoRefreshInFlight) return;
+
+  if (AppState.shiftStatus === "CLOCKED_OUT") {
+    stopLocationWatch("complete");
+    return;
+  }
+
+  geoRefreshInFlight = true;
+  const refreshGeneration = ++geoRefreshGeneration;
+  const button = elements.btnRefreshLocation;
+  if (button) {
+    button.disabled = true;
+    button.classList.add("is-spinning");
+  }
+
+  clearLocationWatch();
+  const seq = ++geoRequestSeq;
+  showGeoLocating(quiet ? "Checking GPS…" : "Refreshing GPS…");
+}
+
 // Query Live Location & Update Radar
 async function queryLiveLocation() {
   elements.statusBadge.className = 'status-pill pill-checking';
   elements.statusBadge.innerHTML = '<span class="pill-dot"></span> Locating GPS…';
 
   try {
-    const pos = await GeoService.getCurrentPosition();
-    AppState.currentLocation = pos;
-    updateDistanceRadar(pos.latitude, pos.longitude, pos.accuracy);
+    const loc = await GeoService.getCurrentPosition();
+    if (seq !== geoRequestSeq) return;
+    applyGeoFix(loc);
+    if (geoWatchId === null && !document.hidden && AppState.shiftStatus !== "CLOCKED_OUT") {
+      startLocationWatch({ silent: true });
+    }
   } catch (err) {
+    if (seq !== geoRequestSeq) return;
+    applyGeoFailure(err);
+    // A timeout or transient error should not leave the radar dead: resume
+    // watching unless permission was denied or the shift is over.
+    if (geoState !== "denied" && !document.hidden && AppState.shiftStatus !== "CLOCKED_OUT") {
+      startLocationWatch({ silent: true });
+    }
+  } finally {
+    if (refreshGeneration !== geoRefreshGeneration) return;
+    geoRefreshInFlight = false;
+    if (button) {
+      button.disabled = false;
+      button.classList.remove("is-spinning");
+    }
+  }
+}
+
+async function getFreshClockLocation() {
+  const employee = AppState.currentEmployee;
+  const generation = geoLifecycleGeneration;
+  let loc;
+  try {
+    loc = await GeoService.getCurrentPosition();
+  } catch (error) {
+    if (generation !== geoLifecycleGeneration || employee !== AppState.currentEmployee) {
+      throw Object.assign(new Error("Location request cancelled."), { cancelled: true });
+    }
+    throw error;
+  }
+  if (generation !== geoLifecycleGeneration || employee !== AppState.currentEmployee || document.hidden) {
+    throw Object.assign(new Error("Location request cancelled."), { cancelled: true });
+  }
+  applyGeoFix(loc);
+
+  if (geoWatchId === null && !document.hidden && AppState.shiftStatus !== "CLOCKED_OUT") {
+    startLocationWatch({ silent: true });
+  }
+  return loc;
+}
+
+function handleVisibilityChange() {
+  if (document.hidden) {
+    if (AppState.currentEmployee) stopLocationWatch("paused");
+    return;
+  }
+  if (!AppState.currentEmployee) return;
+  if (AppState.shiftStatus === "CLOCKED_OUT") {
+    stopLocationWatch("complete");
+    return;
+  }
+  refreshLocation({ quiet: true });
+}
+
+function handleWindowFocus() {
+  if (!AppState.currentEmployee || document.hidden) return;
+  if (geoState === "denied") return;
+  if (Date.now() - geoLastFixAt >= GEO_EMIT_INTERVAL_MS) {
+    refreshLocation({ quiet: true });
+  } else if (geoWatchId === null) {
+    startLocationWatch({ silent: true });
     elements.statusBadge.className = 'status-pill pill-outside';
     elements.statusBadge.innerHTML = '<span class="pill-dot"></span> GPS Offline';
     elements.distanceValue.textContent = 'GPS Error';
@@ -307,6 +711,34 @@ async function queryLiveLocation() {
 function updateDistanceRadar(lat, lon, accuracy) {
   if (!AppState.workplace) return;
 
+  const radius = AppState.workplace.radius_meters;
+  const { distance: dist, effectiveDistance, isInside, reason } = GeoService.verifyGeofence(
+    lat, lon, AppState.workplace.latitude, AppState.workplace.longitude,
+    radius, accuracy, AppState.workplace.max_allowed_accuracy_meters
+  );
+  const validAccuracy = reason === "INSIDE" || reason === "OUTSIDE_GEOFENCE";
+  const conclusion = validAccuracy ? (isInside ? "inside" : "outside") : "unable to verify presence within";
+  elements.distanceValue.textContent = `You are ${dist} m from the office — ${conclusion} the ${radius} m boundary`;
+  elements.distanceSub.textContent = `${AppState.workplace.name} · Radius ${radius}m · ` +
+    (typeof accuracy === "number" && Number.isFinite(accuracy) ? `GPS accuracy ±${accuracy} m` : "GPS accuracy unknown") +
+    (effectiveDistance === null ? "" : ` · Effective (worst-case) distance ${effectiveDistance} m`);
+
+  if (!validAccuracy) {
+    setGeoBadge("Unable to verify — GPS accuracy", "pill-stale");
+    setGeoPulse("outside");
+    if (elements.radarWrapEl) elements.radarWrapEl.className = 'radar-wrap';
+    if (elements.radarDot) elements.radarDot.className = 'radar-user';
+    return;
+  }
+
+  if (isInside) {
+    setGeoBadge("Inside Workplace", "pill-inside");
+    setGeoPulse("inside");
+    if (elements.radarWrapEl) elements.radarWrapEl.className = 'radar-wrap is-inside';
+    if (elements.radarDot)    elements.radarDot.className    = 'radar-user dot-inside';
+  } else {
+    setGeoBadge("Outside Perimeter", "pill-outside");
+    setGeoPulse("outside");
   const dist     = GeoService.calculateDistance(lat, lon, AppState.workplace.latitude, AppState.workplace.longitude);
   const radius   = AppState.workplace.radius_meters;
   const isInside = dist <= radius;
@@ -330,6 +762,8 @@ function updateDistanceRadar(lat, lon, accuracy) {
 // Handle Clock In
 async function handleClockIn() {
   if (!AppState.currentEmployee) return;
+  const employee = AppState.currentEmployee;
+  const empId = employee.id;
   const empId = AppState.currentEmployee.id;
   const today = getLocalDateString();
   const lock = getShiftLock(empId, today);
@@ -338,6 +772,7 @@ async function handleClockIn() {
     showToast("Shift already completed for today. You cannot clock in again.", "warning");
     AppState.shiftStatus = "CLOCKED_OUT";
     updateActionControls();
+    stopLocationWatch("complete");
     return;
   }
 
@@ -351,11 +786,20 @@ async function handleClockIn() {
   elements.btnAction.disabled = true;
   elements.actionBtnText.textContent = "Verifying GPS Location...";
 
+  // Always take a fresh fix immediately before the clock event; the live
+  // watcher can be up to 30s old because of throttling.
+  let loc;
   try {
-    const loc = await GeoService.getCurrentPosition();
-    AppState.currentLocation = loc;
-    updateDistanceRadar(loc.latitude, loc.longitude, loc.accuracy);
+    loc = await getFreshClockLocation();
+  } catch (err) {
+    if (err.cancelled) return;
+    applyGeoFailure(err);
+    showToast(err.message, "error");
+    updateActionControls();
+    return;
+  }
 
+  try {
     elements.actionBtnText.textContent = "Clocking In...";
     const res = await ApiClient.clockIn(
       loc.latitude,
@@ -363,6 +807,7 @@ async function handleClockIn() {
       loc.accuracy
     );
 
+    if (employee !== AppState.currentEmployee) return;
     saveShiftLock(empId, "CLOCKED_IN", res.record, today);
     AppState.shiftStatus = "CLOCKED_IN";
     AppState.todayRecord = res.record;
@@ -380,12 +825,15 @@ async function handleClockIn() {
 // Handle Clock Out
 async function handleClockOut() {
   if (!AppState.currentEmployee) return;
+  const employee = AppState.currentEmployee;
+  const empId = employee.id;
   const empId = AppState.currentEmployee.id;
   const today = getLocalDateString();
   const lock = getShiftLock(empId, today);
 
   if (AppState.shiftStatus === "CLOCKED_OUT" || (lock && lock.status === "CLOCKED_OUT")) {
     showToast("Shift already completed for today.", "info");
+    stopLocationWatch("complete");
     AppState.shiftStatus = "CLOCKED_OUT";
     updateActionControls();
     return;
@@ -394,10 +842,18 @@ async function handleClockOut() {
   elements.btnAction.disabled = true;
   elements.actionBtnText.textContent = "Verifying Location...";
 
+  let loc;
   try {
-    const loc = await GeoService.getCurrentPosition();
-    AppState.currentLocation = loc;
+    loc = await getFreshClockLocation();
+  } catch (err) {
+    if (err.cancelled) return;
+    applyGeoFailure(err);
+    showToast(err.message, "error");
+    updateActionControls();
+    return;
+  }
 
+  try {
     elements.actionBtnText.textContent = "Clocking Out...";
     const res = await ApiClient.clockOut(
       loc.latitude,
@@ -405,11 +861,13 @@ async function handleClockOut() {
       loc.accuracy
     );
 
+    if (employee !== AppState.currentEmployee) return;
     saveShiftLock(empId, "CLOCKED_OUT", res.record, today);
     AppState.shiftStatus = "CLOCKED_OUT";
     AppState.todayRecord = res.record;
     updateActionControls();
     updateTodaySummary();
+    stopLocationWatch("complete");
 
     showToast(`Departure recorded at ${res.record.clock_out_time}. Shift completed!`, "success");
     await refreshShiftData();
@@ -421,6 +879,15 @@ async function handleClockOut() {
 
 // Event Listeners & Auth Handlers
 function setupEventListeners() {
+  // 0. Live radar: manual refresh and watcher lifecycle.
+  if (elements.btnRefreshLocation) {
+    elements.btnRefreshLocation.addEventListener('click', () => refreshLocation());
+  }
+  document.addEventListener('visibilitychange', handleVisibilityChange);
+  window.addEventListener('focus', handleWindowFocus);
+  window.addEventListener('pagehide', () => stopLocationWatch("paused"));
+  window.addEventListener('pageshow', handleVisibilityChange);
+
   // 1. Selector dropdown changes: auto-fill Staff ID
   if (elements.loginEmployeeSelect) {
     elements.loginEmployeeSelect.addEventListener('change', (e) => {
@@ -467,6 +934,7 @@ function setupEventListeners() {
         ApiClient.setEmployeeToken(res.token);
         AppState.currentEmployee = res.employee;
         localStorage.setItem(STORAGE_AUTH_KEY, JSON.stringify(res.employee));
+
         
         showToast(`Welcome, ${res.employee.name}!`, 'success');
         await showPersonalDashboard();

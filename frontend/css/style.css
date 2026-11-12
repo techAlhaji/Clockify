@@ -1027,6 +1027,327 @@ a {
   margin-top: auto;
   padding: 0 24px;
   border: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.employee-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+
+.avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: var(--r-pill);
+  background: var(--pill-bg);
+  color: var(--t1);
+  display: grid;
+  place-items: center;
+  font-size: 16px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.employee-text {
+  min-width: 0;
+}
+
+.employee-text h1 {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.employee-text h3 {
+  font-size: 16px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.employee-text p {
+  font-size: 14px;
+  color: var(--t2);
+}
+
+/* ================= Clock ================= */
+.clock-section {
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 32px 16px;
+}
+
+.digital-clock {
+  font-family: var(--mono);
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--t1);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.date-display {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--t2);
+}
+
+/* ================= Radar card ================= */
+.radar-wrap,
+.radar-box {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 24px;
+  background: var(--card);
+  border: 1px solid var(--b1);
+  border-radius: var(--r-card);
+  box-shadow: var(--shadow-sm);
+  transition: background-color .25s ease;
+}
+
+.radar-head,
+.radar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.radar-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--t2);
+}
+
+.radar-stage {
+  position: relative;
+  width: 160px;
+  height: 160px;
+  flex-shrink: 0;
+  margin: 6px auto;
+}
+
+.radar-bg {
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--b2);
+  border-radius: var(--r-pill);
+  background-color: var(--surface);
+  background-image: repeating-radial-gradient(circle at center, transparent 0 19px, var(--b2) 19px 20px);
+  transition: background-color .3s ease;
+}
+
+.radar-wrap.is-inside .radar-bg,
+.radar-box.is-inside .radar-bg {
+  background-color: var(--success-bg);
+}
+
+.radar-wrap.is-outside .radar-bg,
+.radar-box.is-outside .radar-bg {
+  background-color: var(--danger-bg);
+}
+
+.radar-ch,
+.radar-spin,
+.radar-origin,
+.radar-user {
+  position: absolute;
+}
+
+.radar-ch {
+  inset: 0;
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+
+.radar-ch::before,
+.radar-ch::after {
+  content: "";
+  position: absolute;
+  background: rgba(5, 25, 45, .1);
+}
+
+.radar-ch::before {
+  left: 50%;
+  top: 8%;
+  bottom: 8%;
+  width: 1px;
+}
+
+.radar-ch::after {
+  top: 50%;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+}
+
+.radar-spin {
+  inset: 0;
+  border-radius: var(--r-pill);
+  background: conic-gradient(from 0deg, rgba(5, 25, 45, .08), transparent 65%);
+  animation: radarSweep 4s linear infinite;
+}
+
+@keyframes radarSweep {
+  to { transform: rotate(360deg); }
+}
+
+.radar-origin {
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  border-radius: var(--r-pill);
+  background: var(--navy);
+}
+
+.radar-user {
+  left: 72%;
+  top: 30%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: var(--r-pill);
+  background: var(--t3);
+  box-shadow: 0 0 0 3px var(--surface);
+  transition: background-color .2s ease;
+}
+
+.radar-meta {
+  margin-top: auto;
+}
+
+.dot-inside {
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-bg);
+}
+
+.dot-outside {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-bg);
+}
+
+.pulse-indicator {
+  width: 9px;
+  height: 9px;
+  border-radius: var(--r-pill);
+  background: var(--warning);
+  box-shadow: 0 0 0 3px var(--warning-bg);
+  animation: pulse 1.8s infinite;
+}
+
+.pulse-indicator.inside {
+  background: var(--success);
+  box-shadow: 0 0 0 3px var(--success-bg);
+}
+
+.pulse-indicator.outside {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px var(--danger-bg);
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: .55; transform: scale(.9); }
+  50% { opacity: 1; transform: scale(1.1); }
+}
+
+/* ================= Status pills ================= */
+.status-pill,
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: var(--r-pill);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: var(--r-pill);
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.pill-checking,
+.badge-checking {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.pill-inside,
+.badge-inside {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.pill-outside,
+.badge-outside {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.distance-details {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.distance-value {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--t1);
+}
+
+.distance-sub {
+  margin-top: 4px;
+  font-size: 13px;
+  color: var(--t2);
+  line-height: 1.45;
+}
+
+/* ================= Primary action ================= */
+.action-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.btn-action,
+.btn-primary-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  margin-top: auto;
+  padding: 0 24px;
+  border: none;
   border-radius: var(--r-pill);
   background: var(--brand);
   color: var(--on-brand);
@@ -1722,6 +2043,25 @@ a {
     grid-template-columns: 1fr;
   }
 
+  }
+
+  .employee-bar {
+    flex-wrap: wrap;
+  }
+
+  .employee-text h1 {
+    font-size: 20px;
+  }
+
+  .h-date-box {
+    width: 44px;
+    height: 44px;
+  }
+
+  .signin-row {
+    grid-template-columns: 1fr;
+  }
+
   .toast-container {
     left: 16px;
     right: 16px;
@@ -1820,4 +2160,107 @@ a {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ================= Live geofence radar ================= */
+.radar-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.radar-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--b1);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--t2);
+  cursor: pointer;
+  transition: var(--transition);
+}
+
+.radar-refresh:hover {
+  color: var(--t1);
+  border-color: var(--b2);
+}
+
+.radar-refresh:disabled {
+  opacity: .6;
+  cursor: wait;
+}
+
+.radar-refresh:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+}
+
+.radar-meta .distance-value {
+  font-size: clamp(16px, 2.5vw, 22px);
+  line-height: 1.4;
+}
+
+.radar-refresh svg {
+  width: 14px;
+  height: 14px;
+}
+
+.radar-refresh.is-spinning svg {
+  animation: radarSweep .9s linear infinite;
+}
+
+.radar-freshness {
+  margin-top: 8px;
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--t3);
+}
+
+.radar-freshness.is-stale {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.radar-freshness.is-error {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.pill-stale {
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.pill-denied {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.radar-wrap.is-denied {
+  border-color: rgba(192, 38, 45, .35);
+}
+
+.radar-wrap.is-denied .radar-spin {
+  animation-play-state: paused;
+  opacity: .35;
+}
+
+@media (max-width: 640px) {
+  .radar-head-actions {
+    gap: 6px;
+  }
+
+  .radar-freshness {
+    font-size: 11px;
+  }
+}
+
+.radar-head {
+  flex-wrap: wrap;
 }
