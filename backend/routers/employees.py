@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException
 from datetime import datetime
+from backend.config import get_now
 from backend.database import get_db
 from backend.models import EmployeeModel
 from backend.schemas import EmployeeCreate
+from backend.security import hash_pin
 
 router = APIRouter(prefix="/api/employees", tags=["Employees"])
 
@@ -31,14 +33,17 @@ def get_employee(employee_id: int):
 @router.post("")
 def create_employee(payload: EmployeeCreate):
     """Register a new employee into the system"""
+    if not payload.pin.isdigit() or not (4 <= len(payload.pin) <= 8):
+        raise HTTPException(status_code=422, detail="PIN must be 4-8 digits.")
+
     conn = get_db()
     cursor = conn.cursor()
     try:
-        now = datetime.now().isoformat()
+        now = get_now().isoformat()
         cursor.execute("""
             INSERT INTO employees (staff_id, name, email, department, pin, created_at)
             VALUES (?, ?, ?, ?, ?, ?)
-        """, (payload.staff_id, payload.name, payload.email, payload.department, payload.pin or "1234", now))
+        """, (payload.staff_id, payload.name, payload.email, payload.department, hash_pin(payload.pin), now))
         conn.commit()
         new_id = cursor.lastrowid
         cursor.execute("SELECT * FROM employees WHERE id = ?", (new_id,))

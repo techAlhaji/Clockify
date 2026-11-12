@@ -6,6 +6,12 @@ import sys
 import uvicorn
 from backend.database import init_db
 
+# Windows consoles default to legacy code pages (e.g. cp1252) that cannot
+# encode the emoji in the startup banner, crashing before the server boots.
+for _stream in (sys.stdout, sys.stderr):
+    if _stream.encoding and _stream.encoding.lower() not in ("utf-8", "utf8"):
+        _stream.reconfigure(encoding="utf-8")
+
 def main():
     print("=" * 60)
     print("🚀 Starting Clockify — Geofenced Attendance Server")

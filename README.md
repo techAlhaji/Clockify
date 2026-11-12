@@ -114,6 +114,62 @@ python run.py
 2. Click **"🎯 Use My Current Device GPS"** to automatically populate your current coordinates as the office location, then click **"💾 Save Geofence Settings"**.
 3. Navigate to [http://127.0.0.1:8000/](http://127.0.0.1:8000/) on your browser or mobile device on the same local network.
 4. Allow Location Permissions when prompted.
-5. Notice the radar badge change to **"Inside Workplace"** with your calculated distance (e.g. `4m away`).
+5. Check the radar: for a sufficiently accurate fix it shows, for example, **“You are 24 m from the office — inside the 150 m boundary”**, alongside GPS accuracy and effective (worst-case) distance. Verification uses distance plus accuracy and the server-configured accuracy limit.
 6. Click **"Clock In Now"**. Your attendance, timestamp, and punctuality are logged!
 7. Return to the Admin Portal to view your real-time log, summary metrics, or export to CSV.
+
+
+## Live radar verification
+
+Run the automated regression suite with Node.js 18+ and Python 3.10+:
+
+```bash
+node --test tests/geo.test.cjs tests/radar.test.cjs
+```
+
+No additional test packages are required. Tests mock browser geolocation and compare
+client verification with the actual Python `verify_geofence()` function. When Google
+Chrome is installed, also run the dashboard smoke test:
+
+```bash
+python3 -B tests/browser-smoke.py
+```
+
+It renders the actual HTML, CSS, and JavaScript in headless Chrome with simulated
+GPS fixes; native permission prompts and physical GPS still require the manual pass.
+
+For a real-browser acceptance pass on localhost or HTTPS:
+
+1. Sign in and allow location. Use browser location overrides or walk 100 m;
+   the radar should update on the next fix after 25 m movement or 30 seconds.
+   These thresholds throttle emissions; they cannot force the device to supply fixes.
+2. Deny location, then grant it in browser site settings and choose **Retry location**.
+   The radar should recover without reloading. Repeat with location access revoked
+   during tracking, unavailable device location, and a simulated timeout.
+3. Hide/minimize the tab. Tracking should pause; return to resume with a fresh fix.
+   Repeat hide/show and Retry actions to check that only one watcher remains.
+4. Clock out, then try Retry, focus, and hide/show. Tracking must stay stopped.
+   Sign out during a pending fix and confirm that late callbacks cannot restore it.
+5. Test a 150 m boundary with distance 140 m and accuracy 10 m (inside), then
+   accuracy 10.01 m (outside). Accuracy above the configured limit must show
+   **Unable to verify**, even at the office centre.
+
+### Location samples for presence consumers
+
+```javascript
+const snapshot = window.ClockifyLocation.getSnapshot();
+window.addEventListener("clockify:location-update", event => {
+  const { sample, state, error, fresh, verifiedPresence } = event.detail;
+  // Consume only fresh, verified samples as evidence of presence.
+});
+```
+
+Snapshots and their samples are frozen. A sample contains `latitude`, `longitude`,
+raw `accuracy`, the browser fix `timestamp` (Unix milliseconds), `distance`,
+`effectiveDistance`, `isInside`, and `reason`. The snapshot also contains `ageMs`,
+`state`, `error`, `fresh`, and `verifiedPresence`. No samples are persisted to storage
+or sent automatically to the server. The last fix remains available during signal
+loss, tab hiding, and shift completion, but `verifiedPresence` is false. A fix becomes
+stale after 90 seconds; consumers should call `getSnapshot()` when making decisions,
+rather than retain a previous freshness flag. Logout/session expiry clears the sample
+and publishes an update with `sample: null`.
