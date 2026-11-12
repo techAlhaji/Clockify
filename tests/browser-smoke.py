@@ -20,6 +20,7 @@ Object.defineProperty(navigator, 'geolocation', {value: {
 checks = '''
 (async () => {
   const check = (condition, message) => { if (!condition) throw new Error(message); };
+  check(document.querySelectorAll('#statusBadge').length === 1, 'unique radar status badge');
   AppState.currentEmployee = {id: 1};
   AppState.workplace = {name: 'Office', latitude: 0, longitude: 0,
     radius_meters: 150, max_allowed_accuracy_meters: 80};
