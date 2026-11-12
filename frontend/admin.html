@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="stylesheet" href="/static/css/admin.css">
 </head>
@@ -303,12 +304,45 @@
           </div>
         </div>
 
-        <div class="tbl-toolbar">
-          <input type="search" id="searchEmployee" class="search-input" placeholder="Search by name..." aria-label="Search by employee name">
-          <input type="date" id="filterDate" class="form-control table-filter" aria-label="Filter by date">
-          <button type="button" class="btn-ghost" id="btnToggleAllDates"><span id="lblToggleAllDates">View All History</span></button>
+        <div class="tbl-toolbar" role="search" aria-label="Attendance filters">
+          <div class="view-switch" role="group" aria-label="Attendance view">
+            <button type="button" class="view-switch-btn is-active" id="btnViewRoster" aria-pressed="true">Live Roster</button>
+            <button type="button" class="view-switch-btn" id="btnViewHistory" aria-pressed="false">All History</button>
+            <button type="button" class="view-switch-btn" id="btnViewRange" aria-pressed="false">Date Range</button>
+          </div>
+
+          <div class="date-range-fields" id="dateRangeFields">
+            <label for="filterStartDate">From</label>
+            <input type="date" id="filterStartDate" class="form-control table-filter" aria-label="Range start date">
+            <label for="filterEndDate">To</label>
+            <input type="date" id="filterEndDate" class="form-control table-filter" aria-label="Range end date">
+          </div>
+
+          <input type="search" id="searchEmployee" class="search-input" placeholder="Search all history by name or staff ID…" aria-label="Search attendance history by employee name or staff ID">
+
+          <select id="filterDepartment" class="form-control table-filter" aria-label="Filter by department">
+            <option value="">All departments</option>
+          </select>
+
+          <select id="filterStatus" class="form-control table-filter" aria-label="Filter by attendance status">
+            <option value="">All statuses</option>
+            <option value="CLOCKED_IN">Clocked In</option>
+            <option value="CLOCKED_OUT">Clocked Out</option>
+            <option value="NOT_CLOCKED_IN">Not Clocked In / Absent</option>
+          </select>
+
+          <label class="filter-check">
+            <input type="checkbox" id="filterLateOnly">
+            <span>Late only</span>
+          </label>
+
           <button type="button" class="btn-primary" id="btnApplyFilters">Apply Filters</button>
           <button type="button" class="btn-primary" id="btnExportCsv">Export CSV</button>
+        </div>
+
+        <div class="active-filter-bar" id="activeFilterBar" hidden>
+          <div class="active-filter-chips" id="activeFilterChips" aria-label="Active filters"></div>
+          <button type="button" class="btn-link" id="btnClearFilters">Clear all</button>
         </div>
 
         <div class="table-card">
@@ -342,6 +376,22 @@
             </table>
           </div>
         </div>
+
+        <div class="tbl-pagination" id="tablePagination" hidden>
+          <p class="tbl-page-summary" id="paginationSummary"></p>
+          <div class="tbl-page-controls">
+            <label class="page-size-label" for="pageSizeSelect">Rows per page
+              <select id="pageSizeSelect" class="form-control">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+              </select>
+            </label>
+            <button type="button" class="btn-ghost" id="btnPrevPage">Prev</button>
+            <span class="page-indicator" id="pageIndicator">Page 1 of 1</span>
+            <button type="button" class="btn-ghost" id="btnNextPage">Next</button>
+          </div>
+        </div>
       </section>
 
     </div>
@@ -351,6 +401,19 @@
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
   <!-- JavaScript modules -->
+  <script>
+  // Register service worker for offline-tolerant clocking
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/js/sw.js')
+      .then((registration) => {
+        console.log('Service worker registered:', registration.scope);
+      })
+      .catch((err) => {
+        console.error('Service worker registration failed:', err);
+      });
+  }
+</script>
+
   <script src="/static/js/api.js"></script>
   <script src="/static/js/geo.js"></script>
   <script src="/static/js/admin.js"></script>
@@ -363,21 +426,6 @@
           link.classList.add("is-current");
         });
       });
-
-      const tbody = document.getElementById("attendanceTableBody");
-      const count = document.getElementById("recordCount");
-      if (tbody && count) {
-        const updateCount = () => {
-          if (tbody.querySelector(".tbl-empty")) {
-            count.textContent = "No records for this view";
-            return;
-          }
-          const rows = tbody.querySelectorAll("tr").length;
-          count.textContent = rows + (rows === 1 ? " entry" : " entries");
-        };
-        new MutationObserver(updateCount).observe(tbody, { childList: true, subtree: true });
-        updateCount();
-      }
 
       const seedCard = document.getElementById("btnSeedDemoCard");
       const seedMain = document.getElementById("btnSeedDemo");

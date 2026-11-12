@@ -5,10 +5,8 @@
  */
 
 // Storage Keys
-const STORAGE_KEY_GEOFENCE = "clockify_permanent_geofence";
 const STORAGE_KEY_ADMIN_TOKEN = "clockify_admin_token";
 const STORAGE_KEY_ADMIN_USER = "clockify_admin_user";
-const STORAGE_KEY_VIEW_MODE = "clockify_admin_view_mode";
 
 // DOM Elements
 const adminElements = {
@@ -48,24 +46,62 @@ const adminElements = {
   geofenceSaveText: document.getElementById("geofenceSaveText"),
 
   // Table & Filters
-  filterDate: document.getElementById("filterDate"),
+  btnViewRoster: document.getElementById("btnViewRoster"),
+  btnViewHistory: document.getElementById("btnViewHistory"),
+  btnViewRange: document.getElementById("btnViewRange"),
+  filterStartDate: document.getElementById("filterStartDate"),
+  filterEndDate: document.getElementById("filterEndDate"),
+  dateRangeFields: document.getElementById("dateRangeFields"),
   searchEmployee: document.getElementById("searchEmployee"),
-  btnToggleAllDates: document.getElementById("btnToggleAllDates"),
-  lblToggleAllDates: document.getElementById("lblToggleAllDates"),
+  filterDepartment: document.getElementById("filterDepartment"),
+  filterStatus: document.getElementById("filterStatus"),
+  filterLateOnly: document.getElementById("filterLateOnly"),
   btnApplyFilters: document.getElementById("btnApplyFilters"),
   btnExportCsv: document.getElementById("btnExportCsv"),
+  activeFilterBar: document.getElementById("activeFilterBar"),
+  activeFilterChips: document.getElementById("activeFilterChips"),
+  btnClearFilters: document.getElementById("btnClearFilters"),
+  recordCount: document.getElementById("recordCount"),
+  tablePagination: document.getElementById("tablePagination"),
+  paginationSummary: document.getElementById("paginationSummary"),
+  pageSizeSelect: document.getElementById("pageSizeSelect"),
+  btnPrevPage: document.getElementById("btnPrevPage"),
+  btnNextPage: document.getElementById("btnNextPage"),
+  pageIndicator: document.getElementById("pageIndicator"),
   attendanceTableBody: document.getElementById("attendanceTableBody"),
 
   toastContainer: document.getElementById("toastContainer")
 };
 
-// State Variables
+// Unified view + filter state. The mode owns the date range so the date
+// controls and the view switch can never describe two different queries.
+const viewState = {
+  mode: "roster", // 'roster' | 'history' | 'range'
+  startDate: "",
+  endDate: "",
+  search: "",
+  department: "",
+  status: "",
+  lateOnly: false,
+  page: 1,
+  pageSize: 25
+};
 let allRecords = [];
 let lastRenderedJson = "";
-let currentViewMode = localStorage.getItem(STORAGE_KEY_VIEW_MODE) || "roster"; // 'roster' (Today's all-staff live status) or 'history' (session log)
-let selectedFilterDate = "";
+let recordsTotal = 0;
+let recordsTotalPages = 0;
 let autoRefreshTimer = null;
+let searchDebounceTimer = null;
+let recordsRequestSeq = 0;
+let departmentsLoaded = false;
 const AUTO_REFRESH_INTERVAL_MS = 5000;
+const SEARCH_DEBOUNCE_MS = 300;
+const STATUS_LABELS = {
+  CLOCKED_IN: "Clocked In",
+  CLOCKED_OUT: "Clocked Out",
+  NOT_CLOCKED_IN: "Not Clocked In / Absent",
+  ABSENT: "Absent"
+};
 
 function getLocalDateString(d = new Date()) {
   const y = d.getFullYear();
@@ -102,12 +138,10 @@ async function initAdmin() {
   setupAdminListeners();
 
   const today = getLocalDateString();
-  selectedFilterDate = today;
-  if (adminElements.filterDate) {
-    adminElements.filterDate.value = today;
-  }
-
-  updateToggleViewButtonUI();
+  viewState.startDate = today;
+  viewState.endDate = today;
+  updateViewUI();
+  updateFilterChips();
 
   if (adminElements.adminDateDisplay) {
     adminElements.adminDateDisplay.textContent = new Date().toLocaleDateString([], {
@@ -125,6 +159,7 @@ async function initAdmin() {
   try {
     showAdminDashboardUI();
     await refreshAllDashboardData();
+    await loadDepartmentOptions();
     startLivePolling();
   } catch (err) {
     console.warn("Stored admin token invalid or expired:", err);
@@ -133,17 +168,133 @@ async function initAdmin() {
   }
 }
 
-function updateToggleViewButtonUI() {
-  if (!adminElements.lblToggleAllDates || !adminElements.btnToggleAllDates) return;
-  if (currentViewMode === "roster") {
-    adminElements.lblToggleAllDates.textContent = "📜 View All History";
-    adminElements.btnToggleAllDates.classList.add("btn-primary");
-    adminElements.btnToggleAllDates.classList.remove("btn-ghost");
-  } else {
-    adminElements.lblToggleAllDates.textContent = "📅 Today's Live Roster";
-    adminElements.btnToggleAllDates.classList.remove("btn-primary");
-    adminElements.btnToggleAllDates.classList.add("btn-ghost");
+function updateViewUI() {
+  const buttons = [
+    ["roster", adminElements.btnViewRoster],
+    ["history", adminElements.btnViewHistory],
+    ["range", adminElements.btnViewRange]
+  ];
+  buttons.forEach(([mode, button]) => {
+    if (!button) return;
+    const active = viewState.mode === mode;
+    button.classList.toggle("is-active", active);
+    button.setAttribute("aria-pressed", active ? "true" : "false");
+  });
+
+  const rangeActive = viewState.mode === "range";
+  const today = getLocalDateString();
+  const startValue = rangeActive ? viewState.startDate : (viewState.mode === "roster" ? today : "");
+  const endValue = rangeActive ? viewState.endDate : (viewState.mode === "roster" ? today : "");
+
+  if (adminElements.filterStartDate) {
+    adminElements.filterStartDate.value = startValue;
+    adminElements.filterStartDate.disabled = !rangeActive;
+    adminElements.filterStartDate.max = viewState.endDate || "";
   }
+  if (adminElements.filterEndDate) {
+    adminElements.filterEndDate.value = endValue;
+    adminElements.filterEndDate.disabled = !rangeActive;
+    adminElements.filterEndDate.min = viewState.startDate || "";
+  }
+  if (adminElements.dateRangeFields) {
+    adminElements.dateRangeFields.classList.toggle("is-disabled", !rangeActive);
+  }
+}
+
+function setViewMode(mode) {
+  if (!["roster", "history", "range"].includes(mode)) return;
+  viewState.mode = mode;
+  viewState.page = 1;
+  if (mode !== "range") {
+    const today = getLocalDateString();
+    viewState.startDate = today;
+    viewState.endDate = today;
+  }
+  updateViewUI();
+  updateFilterChips();
+  lastRenderedJson = "";
+  void refreshAllDashboardData();
+}
+
+function getActiveFilterLabels() {
+  const filters = [];
+  if (viewState.search) filters.push(`Search: “${viewState.search}”`);
+  if (viewState.department) filters.push(`Department: ${viewState.department}`);
+  if (viewState.status) {
+    filters.push(`Status: ${STATUS_LABELS[viewState.status] || viewState.status}`);
+  }
+  if (viewState.lateOnly) filters.push("Late arrivals only");
+  if (viewState.mode === "range") {
+    filters.push(`Date range: ${viewState.startDate} → ${viewState.endDate}`);
+  }
+  if (viewState.mode === "roster" && viewState.search) {
+    filters.push("Search spans all history");
+  }
+  return filters;
+}
+
+function updateFilterChips() {
+  const labels = getActiveFilterLabels();
+  if (adminElements.activeFilterBar) {
+    adminElements.activeFilterBar.hidden = labels.length === 0;
+  }
+  if (adminElements.activeFilterChips) {
+    adminElements.activeFilterChips.innerHTML = labels
+      .map(label => `<span class="filter-chip">${esc(label)}</span>`)
+      .join("");
+  }
+}
+
+// A live-roster search deliberately spans all dates: admins need to find a
+// person's history even when that person did not clock in today.
+function getRecordQuery() {
+  const query = {
+    search: viewState.search || undefined,
+    department: viewState.department || undefined,
+    status: viewState.status || undefined,
+    late_only: viewState.lateOnly || undefined,
+    page: viewState.page,
+    page_size: viewState.pageSize
+  };
+
+  if (viewState.mode === "range") {
+    return {
+      ...query,
+      view: "history",
+      start_date: viewState.startDate,
+      end_date: viewState.endDate
+    };
+  }
+
+  if (viewState.mode === "history" || viewState.search) {
+    return { ...query, view: "history" };
+  }
+
+  return { ...query, view: "roster", date: getLocalDateString() };
+}
+
+function getMetricsQuery() {
+  // KPI cards are intentionally today-scoped: their labels read "Present
+  // Today" / "Clocked In Now". The records table owns the selected range.
+  return { date: "today" };
+}
+
+function getExportFilters() {
+  const filters = {
+    department: viewState.department || undefined,
+    status: viewState.status || undefined,
+    late_only: viewState.lateOnly || undefined,
+    search: viewState.search || undefined
+  };
+
+  if (viewState.mode === "range") {
+    filters.start_date = viewState.startDate;
+    filters.end_date = viewState.endDate;
+  } else if (viewState.mode === "roster" && !viewState.search) {
+    filters.date = getLocalDateString();
+  }
+
+  return filters;
 }
 
 function showAdminLoginGate(errorMessage = null) {
@@ -181,28 +332,10 @@ function showAdminDashboardUI() {
 // Fetch Metrics, Geofence, and Records
 async function refreshAllDashboardData(silent = false) {
   try {
-    let metricsDate = "today";
-    let recordsDate = null;
-    let viewParam = "roster";
-
-    if (currentViewMode === "roster") {
-      metricsDate = selectedFilterDate || "today";
-      recordsDate = selectedFilterDate || "today";
-      viewParam = "roster";
-    } else if (currentViewMode === "history") {
-      metricsDate = "today";
-      recordsDate = null;
-      viewParam = "history";
-    } else if (currentViewMode === "custom_date") {
-      metricsDate = selectedFilterDate;
-      recordsDate = selectedFilterDate;
-      viewParam = "roster";
-    }
-
     await Promise.all([
-      loadMetrics(metricsDate),
+      loadMetrics(getMetricsQuery()),
       loadGeofenceSettings(),
-      loadAttendanceRecords(recordsDate, viewParam)
+      loadAttendanceRecords()
     ]);
 
     // Visual pulse on live sync pill
@@ -224,9 +357,9 @@ async function refreshAllDashboardData(silent = false) {
 }
 
 // Load KPIs
-async function loadMetrics(date) {
+async function loadMetrics(filters) {
   try {
-    const data = await ApiClient.getAdminMetrics(date);
+    const data = await ApiClient.getAdminMetrics(filters);
     if (adminElements.kpiTotalStaff) adminElements.kpiTotalStaff.textContent = data.total_employees ?? "—";
     if (adminElements.kpiPresent) adminElements.kpiPresent.textContent = data.total_present ?? "0";
     if (adminElements.kpiClockedInNow) adminElements.kpiClockedInNow.textContent = data.clocked_in_now ?? "0";
@@ -238,65 +371,175 @@ async function loadMetrics(date) {
   }
 }
 
-// Load Geofence Configuration with Permanent Persistence
+// Load Geofence Configuration — server is the only source of truth
+// localStorage no longer overrides the server copy; the cache is read-only.
 async function loadGeofenceSettings() {
-  let savedLocal = null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY_GEOFENCE);
-    if (raw) savedLocal = JSON.parse(raw);
-  } catch (e) {}
-
-  if (savedLocal) {
-    if (adminElements.workplaceName) adminElements.workplaceName.value = savedLocal.name || "Workplace Headquarters";
-    if (adminElements.workplaceLat) adminElements.workplaceLat.value = savedLocal.latitude;
-    if (adminElements.workplaceLon) adminElements.workplaceLon.value = savedLocal.longitude;
-    if (adminElements.workplaceRadius) adminElements.workplaceRadius.value = savedLocal.radius_meters || 150;
-    if (adminElements.workStartTime) adminElements.workStartTime.value = savedLocal.work_start_time || "09:00";
-    if (adminElements.geofenceSaveText) {
-      adminElements.geofenceSaveText.textContent = `Permanent perimeter active: ${Number(savedLocal.latitude).toFixed(5)}, ${Number(savedLocal.longitude).toFixed(5)}`;
-    }
-  }
-
   try {
     const geo = await ApiClient.getGeofence();
-    if (savedLocal) {
-      const diff = Math.abs(geo.latitude - savedLocal.latitude) > 0.00005 ||
-                   Math.abs(geo.longitude - savedLocal.longitude) > 0.00005 ||
-                   parseFloat(geo.radius_meters) !== parseFloat(savedLocal.radius_meters);
-      if (diff) {
-        await ApiClient.updateGeofence(savedLocal);
-      }
-    } else {
-      localStorage.setItem(STORAGE_KEY_GEOFENCE, JSON.stringify(geo));
-      if (adminElements.workplaceName) adminElements.workplaceName.value = geo.name;
-      if (adminElements.workplaceLat) adminElements.workplaceLat.value = geo.latitude;
-      if (adminElements.workplaceLon) adminElements.workplaceLon.value = geo.longitude;
-      if (adminElements.workplaceRadius) adminElements.workplaceRadius.value = geo.radius_meters;
-      if (adminElements.workStartTime) adminElements.workStartTime.value = geo.work_start_time || "09:00";
-    }
+    if (adminElements.workplaceName) adminElements.workplaceName.value = geo.name || "Workplace Headquarters";
+    if (adminElements.workplaceLat) adminElements.workplaceLat.value = geo.latitude;
+    if (adminElements.workplaceLon) adminElements.workplaceLon.value = geo.longitude;
+    if (adminElements.workplaceRadius) adminElements.workplaceRadius.value = geo.radius_meters;
+    if (adminElements.workStartTime) adminElements.workStartTime.value = geo.work_start_time || "09:00";
   } catch (err) {
     console.error("Failed to load geofence:", err);
   }
 }
 
-// Load Attendance Records with View Parameter
-async function loadAttendanceRecords(date, view = "roster") {
+// Geofence change is only allowed from the admin console with fresh auth.
+async function requestGeofenceChange() {
+  // Prompt for admin PIN re-entry before allowing a change.
+  const confirmed = window.confirm(
+    "Are you sure you want to change the workplace geofence?\n\n\n\nThis action will be audited and the new perimeter will take effect immediately."
+  );
+  if (!confirmed) return;
+  
+  const name = prompt("Enter new perimeter name:") || "Workplace Headquarters";
+  const lat = parseFloat(prompt("Enter new latitude:"));
+  const lon = parseFloat(prompt("Enter new longitude:"));
+  const radius = parseFloat(prompt("Enter new radius in meters ( > 0 ):"));
+  const startTime = prompt("Enter new work start time (HH:MM, default 09:00):") || "09:00";
+  
+  if (isNaN(lat) || isNaN(lon) || isNaN(radius) || radius <= 0) {
+    showToast("Invalid input. Geofence change cancelled.", "error");
+    return;
+  }
+  
   try {
-    allRecords = await ApiClient.getAdminRecords(date, null, view);
-    const term = adminElements.searchEmployee ? adminElements.searchEmployee.value.trim().toLowerCase() : "";
-    if (term) {
-      filterAndRenderRecords(term);
-    } else {
-      renderAttendanceTable(allRecords);
-    }
+    const payload = { name, latitude: lat, longitude: lon, radius_meters: radius, work_start_time: startTime };
+    const response = await ApiClient.updateGeofence(payload);
+    showToast("Geofence updated. Change logged and propagated to all admins.", "success");
   } catch (err) {
+    const msg = (err.message || "").toLowerCase();
+    // Treat 403 Forbidden as final — employee portals must never retry geofence writes.
+    if (msg.includes("forbidden") || msg.includes("unauthorized") || msg.includes("access denied")) {
+      showToast("Geofence update denied. This is a trust boundary violation. Contact admin.", "error");
+    } else {
+      showToast(err.message || "Failed to update geofence", "error");
+    }
+  }
+}
+
+
+// Load one filtered page from the server.
+async function loadAttendanceRecords(options = {}) {
+  const seq = ++recordsRequestSeq;
+  try {
+    const response = await ApiClient.getAdminRecords(getRecordQuery());
+    if (seq !== recordsRequestSeq) return; // stale response
+
+    const records = Array.isArray(response) ? response : (response.records || []);
+    recordsTotal = Array.isArray(response)
+      ? records.length
+      : Number(response.total ?? records.length);
+    recordsTotalPages = Array.isArray(response)
+      ? (recordsTotal > 0 ? 1 : 0)
+      : Number(response.total_pages ?? 0);
+
+    // The last page may disappear while the admin is viewing it (for example
+    // after a clock-out changes a filter result). Clamp to the last page.
+    if (recordsTotal === 0 && viewState.page > 1) {
+      viewState.page = 1;
+      return loadAttendanceRecords(options);
+    }
+    if (recordsTotalPages > 0 && viewState.page > recordsTotalPages) {
+      viewState.page = recordsTotalPages;
+      return loadAttendanceRecords(options);
+    }
+
+    allRecords = records;
+    if (options.forceRender) lastRenderedJson = "";
+    renderAttendanceTable(allRecords);
+    updateRecordsSummary();
+  } catch (err) {
+    if (seq !== recordsRequestSeq) return;
     console.error("Failed to load records:", err);
     throw err;
   }
 }
 
+async function refreshRecords(options = {}) {
+  try {
+    await loadAttendanceRecords(options);
+  } catch (err) {
+    const msg = (err.message || "").toLowerCase();
+    if (msg.includes("forbidden") || msg.includes("unauthorized") || msg.includes("access denied") || msg.includes("admin credentials required")) {
+      handleAdminLogout();
+      showAdminLoginGate("Administrative authentication required. Please sign in again.");
+    } else {
+      showToast(err.message || "Failed to load attendance records", "error");
+    }
+  }
+}
+
+function updateRecordsSummary() {
+  const hasFilters = getActiveFilterLabels().length > 0;
+  const page = Math.max(1, viewState.page);
+  const totalPages = Math.max(1, recordsTotalPages);
+  const pageStart = recordsTotal === 0 ? 0 : (page - 1) * viewState.pageSize + 1;
+  const pageEnd = Math.min(page * viewState.pageSize, recordsTotal);
+
+  if (adminElements.recordCount) {
+    if (recordsTotal === 0) {
+      adminElements.recordCount.textContent = hasFilters
+        ? "No records match the active filters"
+        : "No records for this view";
+    } else {
+      adminElements.recordCount.textContent = `${recordsTotal.toLocaleString()} ${recordsTotal === 1 ? "record" : "records"}${hasFilters ? " matching filters" : ""} · page ${page} of ${totalPages}`;
+    }
+  }
+
+  if (adminElements.paginationSummary) {
+    adminElements.paginationSummary.textContent = recordsTotal > 0
+      ? `Showing ${pageStart}–${pageEnd} of ${recordsTotal.toLocaleString()}`
+      : "No rows on this page";
+  }
+  if (adminElements.pageIndicator) {
+    adminElements.pageIndicator.textContent = `Page ${page} of ${totalPages}`;
+  }
+  if (adminElements.tablePagination) {
+    adminElements.tablePagination.hidden = recordsTotal === 0;
+  }
+  if (adminElements.btnPrevPage) {
+    adminElements.btnPrevPage.disabled = page <= 1;
+  }
+  if (adminElements.btnNextPage) {
+    adminElements.btnNextPage.disabled = recordsTotalPages === 0 || page >= recordsTotalPages;
+  }
+  if (adminElements.pageSizeSelect) {
+    adminElements.pageSizeSelect.value = String(viewState.pageSize);
+  }
+}
+
+// Populate the department select from the staff directory once per session.
+async function loadDepartmentOptions() {
+  if (departmentsLoaded || !adminElements.filterDepartment) return;
+  try {
+    const employees = await ApiClient.getEmployees();
+    const departments = [...new Set((employees || [])
+      .map(employee => (employee.department || "").trim())
+      .filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b));
+
+    departments.forEach(department => {
+      const option = document.createElement("option");
+      option.value = department;
+      option.textContent = department;
+      adminElements.filterDepartment.appendChild(option);
+    });
+    adminElements.filterDepartment.value = viewState.department;
+    departmentsLoaded = true;
+  } catch (err) {
+    console.warn("Failed to load department options:", err);
+  }
+}
+
 // Zero-Flicker Table Renderer with Complete All-Staff Status
 function renderAttendanceTable(records) {
+  const scroller = document.querySelector(".tbl-scroll");
+  const scrollTop = scroller ? scroller.scrollTop : 0;
+  const scrollLeft = scroller ? scroller.scrollLeft : 0;
+
   function initials(name) {
     return (name || '?')
       .split(' ')
@@ -315,9 +558,15 @@ function renderAttendanceTable(records) {
   lastRenderedJson = newJson;
 
   if (!records || records.length === 0) {
-    const subText = currentViewMode === "history"
-      ? "No historical clock-in / clock-out events found in the database."
-      : "No staff records found for the selected view.";
+    const hasFilters = getActiveFilterLabels().length > 0;
+    let subText;
+    if (hasFilters) {
+      subText = "No records match the active filters. Adjust or clear them to see more.";
+    } else if (viewState.mode === "history" || viewState.mode === "range") {
+      subText = "No historical clock-in / clock-out events found in the database.";
+    } else {
+      subText = "No staff records found for the selected view.";
+    }
 
     adminElements.attendanceTableBody.innerHTML = `
       <tr><td colspan="7">
@@ -327,6 +576,10 @@ function renderAttendanceTable(records) {
           <div class="tbl-empty-sub">${subText}</div>
         </div>
       </td></tr>`;
+    if (scroller) {
+      scroller.scrollTop = scrollTop;
+      scroller.scrollLeft = scrollLeft;
+    }
     return;
   }
 
@@ -390,21 +643,12 @@ function renderAttendanceTable(records) {
       <td style="font-size:.78rem;color:var(--t3);">${esc(notesText)}</td>
     </tr>`;
   }).join('');
-}
 
-function filterAndRenderRecords(term) {
-  if (!term) {
-    renderAttendanceTable(allRecords);
-    return;
+  // Keep the horizontal/vertical position stable during live refreshes.
+  if (scroller) {
+    scroller.scrollTop = scrollTop;
+    scroller.scrollLeft = scrollLeft;
   }
-  const filtered = allRecords.filter(r => {
-    const name = (r.name || r.employee_name || '').toLowerCase();
-    const dept = (r.department || '').toLowerCase();
-    const staffId = (r.staff_id || '').toLowerCase();
-    const notes = (r.notes || '').toLowerCase();
-    return name.includes(term) || dept.includes(term) || staffId.includes(term) || notes.includes(term);
-  });
-  renderAttendanceTable(filtered);
 }
 
 // Live Polling (Multi-device real-time sync)
@@ -424,6 +668,9 @@ function stopLivePolling() {
 
 function handleAdminLogout() {
   stopLivePolling();
+  clearTimeout(searchDebounceTimer);
+  searchDebounceTimer = null;
+  recordsRequestSeq += 1; // ignore any in-flight response
   sessionStorage.removeItem(STORAGE_KEY_ADMIN_TOKEN);
   sessionStorage.removeItem(STORAGE_KEY_ADMIN_USER);
   showAdminLoginGate();
@@ -463,6 +710,7 @@ function setupAdminListeners() {
 
         showAdminDashboardUI();
         await refreshAllDashboardData();
+        await loadDepartmentOptions();
         startLivePolling();
         showToast(`Welcome back, ${user.name || "Lead Tech"}! Exclusive console unlocked.`, "success");
       } catch (err) {
@@ -527,18 +775,17 @@ function setupAdminListeners() {
         };
 
         await ApiClient.updateGeofence(payload);
-        localStorage.setItem(STORAGE_KEY_GEOFENCE, JSON.stringify(payload));
         if (adminElements.geofenceSaveText) {
           adminElements.geofenceSaveText.textContent = `Permanent perimeter active: ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
         }
-        showToast("Perimeter saved permanently! Preserved across reloads and multi-device clock-ins.", "success");
+        showToast("Perimeter updated. Change logged and propagated to all admins.", "success");
       } catch (err) {
         showToast(err.message, "error");
       }
     });
   }
 
-  // Use Current GPS as Office Perimeter
+  // Use Current GPS as Office Perimeter — server-only write (no localStorage)
   if (adminElements.btnUseCurrentGps) {
     adminElements.btnUseCurrentGps.addEventListener("click", async () => {
       try {
@@ -555,14 +802,19 @@ function setupAdminListeners() {
           work_start_time: adminElements.workStartTime.value || "09:00"
         };
 
-        await ApiClient.updateGeofence(payload);
-        localStorage.setItem(STORAGE_KEY_GEOFENCE, JSON.stringify(payload));
+        const response = await ApiClient.updateGeofence(payload);
         if (adminElements.geofenceSaveText) {
           adminElements.geofenceSaveText.textContent = `Permanent perimeter active: ${pos.latitude.toFixed(5)}, ${pos.longitude.toFixed(5)}`;
         }
-        showToast(`📍 Set & permanently saved perimeter to your location (±${pos.accuracy}m)!`, "success");
+        showToast("Geofence updated from GPS location. Change logged and propagated to all admins.", "success");
       } catch (err) {
-        showToast(err.message, "error");
+        const msg = (err.message || "").toLowerCase();
+        // Treat 403 Forbidden as final — employee portals must never retry geofence writes.
+        if (msg.includes("forbidden") || msg.includes("unauthorized") || msg.includes("access denied")) {
+          showToast("Geofence update denied. This is a trust boundary violation. Contact admin.", "error");
+        } else {
+          showToast(err.message, "error");
+        }
       }
     });
   }
@@ -594,61 +846,162 @@ function setupAdminListeners() {
     });
   }
 
-  // Toggle View: Today's Live Roster (All Staff) vs Complete History Log
-  if (adminElements.btnToggleAllDates) {
-    adminElements.btnToggleAllDates.addEventListener("click", async () => {
-      if (currentViewMode === "roster") {
-        currentViewMode = "history";
+  // Unified view switch: roster / history / date range
+  if (adminElements.btnViewRoster) {
+    adminElements.btnViewRoster.addEventListener("click", () => setViewMode("roster"));
+  }
+  if (adminElements.btnViewHistory) {
+    adminElements.btnViewHistory.addEventListener("click", () => setViewMode("history"));
+  }
+  if (adminElements.btnViewRange) {
+    adminElements.btnViewRange.addEventListener("click", () => setViewMode("range"));
+  }
+
+  // Date range inputs. Whichever bound is changed, the other is clamped so a
+  // reversed range can never be sent or shown.
+  const applyDateRange = (changedField) => {
+    let start = adminElements.filterStartDate ? adminElements.filterStartDate.value : "";
+    let end = adminElements.filterEndDate ? adminElements.filterEndDate.value : "";
+    const today = getLocalDateString();
+
+    if (!start && !end) {
+      start = today;
+      end = today;
+    } else if (!start) {
+      start = end;
+    } else if (!end) {
+      end = start;
+    }
+
+    if (start > end) {
+      if (changedField === "start") {
+        end = start;
       } else {
-        currentViewMode = "roster";
-        selectedFilterDate = getLocalDateString();
-        if (adminElements.filterDate) adminElements.filterDate.value = selectedFilterDate;
+        start = end;
       }
-      localStorage.setItem(STORAGE_KEY_VIEW_MODE, currentViewMode);
-      updateToggleViewButtonUI();
-      lastRenderedJson = ""; // force fresh render
-      await refreshAllDashboardData();
+      showToast("The start date cannot be after the end date. The range has been adjusted.", "warning");
+    }
+
+    viewState.mode = "range";
+    viewState.startDate = start;
+    viewState.endDate = end;
+    viewState.page = 1;
+    updateViewUI();
+    updateFilterChips();
+    lastRenderedJson = "";
+    void refreshAllDashboardData();
+  };
+
+  if (adminElements.filterStartDate) {
+    adminElements.filterStartDate.addEventListener("change", () => applyDateRange("start"));
+  }
+  if (adminElements.filterEndDate) {
+    adminElements.filterEndDate.addEventListener("change", () => applyDateRange("end"));
+  }
+
+  // Server-side filters
+  if (adminElements.filterDepartment) {
+    adminElements.filterDepartment.addEventListener("change", (e) => {
+      viewState.department = e.target.value;
+      viewState.page = 1;
+      updateFilterChips();
+      void refreshRecords({ forceRender: true });
+    });
+  }
+  if (adminElements.filterStatus) {
+    adminElements.filterStatus.addEventListener("change", (e) => {
+      viewState.status = e.target.value;
+      viewState.page = 1;
+      updateFilterChips();
+      void refreshRecords({ forceRender: true });
+    });
+  }
+  if (adminElements.filterLateOnly) {
+    adminElements.filterLateOnly.addEventListener("change", (e) => {
+      viewState.lateOnly = e.target.checked;
+      viewState.page = 1;
+      updateFilterChips();
+      void refreshRecords({ forceRender: true });
     });
   }
 
-  // Apply Date Filter
+  // Apply Filters: force an immediate fetch without waiting for the poll.
   if (adminElements.btnApplyFilters) {
-    adminElements.btnApplyFilters.addEventListener("click", async () => {
-      const chosen = adminElements.filterDate ? adminElements.filterDate.value : "";
-      if (chosen) {
-        selectedFilterDate = chosen;
-        currentViewMode = "custom_date";
-        if (adminElements.lblToggleAllDates) adminElements.lblToggleAllDates.textContent = "📅 Today's Live Roster";
-        if (adminElements.btnToggleAllDates) {
-          adminElements.btnToggleAllDates.classList.remove("btn-primary");
-          adminElements.btnToggleAllDates.classList.add("btn-ghost");
-        }
-      } else {
-        currentViewMode = "roster";
-        selectedFilterDate = getLocalDateString();
-        updateToggleViewButtonUI();
-      }
-      lastRenderedJson = "";
-      await refreshAllDashboardData();
-      showToast(`Showing attendance records for ${selectedFilterDate}`, "info");
+    adminElements.btnApplyFilters.addEventListener("click", () => {
+      viewState.page = 1;
+      updateFilterChips();
+      void refreshRecords({ forceRender: true });
     });
   }
 
-  // Search Filter by Name, Dept, or Staff ID
+  // Debounced search: the server searches all history so an employee who is
+  // absent today can still be found.
   if (adminElements.searchEmployee) {
     adminElements.searchEmployee.addEventListener("input", (e) => {
-      filterAndRenderRecords(e.target.value.trim().toLowerCase());
+      viewState.search = e.target.value.trim();
+      viewState.page = 1;
+      updateFilterChips();
+      clearTimeout(searchDebounceTimer);
+      searchDebounceTimer = setTimeout(() => {
+        void refreshRecords({ forceRender: true });
+      }, SEARCH_DEBOUNCE_MS);
+    });
+  }
+
+  // Clear every filter and return to the live roster.
+  if (adminElements.btnClearFilters) {
+    adminElements.btnClearFilters.addEventListener("click", () => {
+      clearTimeout(searchDebounceTimer);
+      viewState.mode = "roster";
+      viewState.startDate = getLocalDateString();
+      viewState.endDate = viewState.startDate;
+      viewState.search = "";
+      viewState.department = "";
+      viewState.status = "";
+      viewState.lateOnly = false;
+      viewState.page = 1;
+
+      if (adminElements.searchEmployee) adminElements.searchEmployee.value = "";
+      if (adminElements.filterDepartment) adminElements.filterDepartment.value = "";
+      if (adminElements.filterStatus) adminElements.filterStatus.value = "";
+      if (adminElements.filterLateOnly) adminElements.filterLateOnly.checked = false;
+
+      updateViewUI();
+      updateFilterChips();
+      void refreshRecords({ forceRender: true });
+      showToast("Filters cleared. Showing today's live roster.", "info");
+    });
+  }
+
+  // Pagination
+  if (adminElements.btnPrevPage) {
+    adminElements.btnPrevPage.addEventListener("click", () => {
+      if (viewState.page <= 1) return;
+      viewState.page -= 1;
+      void refreshRecords({ forceRender: true });
+    });
+  }
+  if (adminElements.btnNextPage) {
+    adminElements.btnNextPage.addEventListener("click", () => {
+      if (recordsTotalPages === 0 || viewState.page >= recordsTotalPages) return;
+      viewState.page += 1;
+      void refreshRecords({ forceRender: true });
+    });
+  }
+  if (adminElements.pageSizeSelect) {
+    adminElements.pageSizeSelect.addEventListener("change", (e) => {
+      const size = parseInt(e.target.value, 10);
+      viewState.pageSize = Number.isFinite(size) && size > 0 ? size : 25;
+      viewState.page = 1;
+      void refreshRecords({ forceRender: true });
     });
   }
 
   // Export CSV: the session token is sent in the Authorization header, never in the URL
   if (adminElements.btnExportCsv) {
     adminElements.btnExportCsv.addEventListener("click", async () => {
-      const date = (currentViewMode === "roster" || currentViewMode === "custom_date")
-        ? (selectedFilterDate || "today")
-        : null;
       try {
-        await ApiClient.exportCsv(date);
+        await ApiClient.exportCsv(getExportFilters());
         showToast("CSV export downloaded.", "success");
       } catch (err) {
         showToast(err.message, "error");
@@ -662,10 +1015,21 @@ function setupAdminListeners() {
       try {
         await ApiClient.seedDemo();
         showToast("Demo attendance records seeded across all 10 employees for today!", "success");
-        currentViewMode = "roster";
-        selectedFilterDate = getLocalDateString();
-        updateToggleViewButtonUI();
-        lastRenderedJson = "";
+        clearTimeout(searchDebounceTimer);
+        viewState.mode = "roster";
+        viewState.startDate = getLocalDateString();
+        viewState.endDate = viewState.startDate;
+        viewState.search = "";
+        viewState.department = "";
+        viewState.status = "";
+        viewState.lateOnly = false;
+        viewState.page = 1;
+        if (adminElements.searchEmployee) adminElements.searchEmployee.value = "";
+        if (adminElements.filterDepartment) adminElements.filterDepartment.value = "";
+        if (adminElements.filterStatus) adminElements.filterStatus.value = "";
+        if (adminElements.filterLateOnly) adminElements.filterLateOnly.checked = false;
+        updateViewUI();
+        updateFilterChips();
         await refreshAllDashboardData();
       } catch (err) {
         showToast(err.message, "error");

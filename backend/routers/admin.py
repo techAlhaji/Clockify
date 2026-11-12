@@ -35,6 +35,33 @@ router = APIRouter(prefix="/api/admin", tags=["Admin"])
 # Geofence configuration
 # ---------------------------------------------------------------------------
 
+# Audit log for geofence changes
+# ---------------------------------------------------------------------------
+
+# Ensure audit_log table exists (SQLite migration)
+conn = get_db()
+cr = conn.cursor()
+cr.execute(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='geofence_audit'"
+)
+if not cr.fetchone():
+    cr.execute("""
+        CREATE TABLE geofence_audit (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            actor_id INTEGER NOT NULL,
+            old_latitude DOUBLE PRECISION,
+            old_longitude DOUBLE PRECISION,
+            old_radius_meters DOUBLE PRECISION,
+            old_work_start_time TEXT,
+            new_latitude DOUBLE PRECISION NOT NULL,
+            new_longitude DOUBLE PRECISION NOT NULL,
+            new_radius_meters DOUBLE PRECISION NOT NULL,
+            new_work_start_time TEXT NOT NULL,
+            changed_at TEXT NOT NULL,
+            actor_ip TEXT
+        )""")
+conn.close()
+
 @router.get("/geofence")
 def get_geofence():
     """Retrieve current active workplace geofence coordinates and radius."""
@@ -51,11 +78,17 @@ def get_geofence():
 
 
 @router.put("/geofence", dependencies=[Depends(require_admin)])
-def update_geofence(payload: GeofenceUpdate):
+def update_geofence(payload: GeofenceUpdate, if_match: Optional[str] = Header(None)):
     """
     Update the active workplace coordinates, radius and shift start time.
     Changes take effect immediately — clock-in/out validation reads the
     latest saved settings on every request.
+
+    If-Match header protection: the request is rejected if the geofence
+    version on the server has changed since the caller last read it.
+    This prevents two admins from clobbering each other's changes.
+
+    The actor's IP and admin user ID are recorded for audit purposes.
     """
     # Validate shift start time format (24h HH:MM)
     work_start_time = payload.work_start_time or "09:00"
@@ -69,25 +102,30 @@ def update_geofence(payload: GeofenceUpdate):
 
     conn = get_db()
     cursor = conn.cursor()
-    now = get_now().isoformat()
 
-    cursor.execute("""
-        UPDATE geofence_settings
-        SET name = ?,
-            latitude = ?,
-            longitude = ?,
-            radius_meters = ?,
-            work_start_time = ?,
-            updated_at = ?
-        WHERE id = (SELECT id FROM geofence_settings ORDER BY id DESC LIMIT 1)
-    """, (
-        payload.name or "Workplace Headquarters",
-        payload.latitude,
-        payload.longitude,
-        payload.radius_meters,
-        work_start_time,
-        now
-    ))
+    # Read the current geofence row and its version for If-Match and audit
+    cursor.execute(
+        "SELECT id, latitude, longitude, radius_meters, work_start_time, updated_at FROM geofence_settings ORDER BY id DESC LIMIT 1"
+    )
+    current = cursor.fetchone()
+
+    if not current:
+        raise HTTPException(status_code=404, detail="No geofence settings configured")
+
+    # If-Match: compare the server's version stamp with the client-supplied one
+    if if_match and if_match != str(current["updated_at"]):
+        raise HTTPException(
+            status_code=412,
+            detail="Geofence has been modified since you last read it. Please reload and try again."
+        )
+
+    # Record old values for audit
+    old_lat = current["latitude"]
+    old_lon = current["longitude"]
+    old_rad = current["radius_meters"]
+    old_start = current["work_start_time"]
+
+    now = get_now().isoformat()
 
     # If no settings row existed yet, seed the first configuration (CRUD upsert)
     if cursor.rowcount == 0:
@@ -103,7 +141,43 @@ def update_geofence(payload: GeofenceUpdate):
             work_start_time,
             now
         ))
+    else:
+        cursor.execute(
+            """
+            UPDATE geofence_settings
+            SET name = ?,
+                latitude = ?,
+                longitude = ?,
+                radius_meters = ?,
+                work_start_time = ?,
+                updated_at = ?
+            WHERE id = (SELECT id FROM geofence_settings ORDER BY id DESC LIMIT 1)
+        """, (
+            payload.name or "Workplace Headquarters",
+            payload.latitude,
+            payload.longitude,
+            payload.radius_meters,
+            work_start_time,
+            now
+        ))
 
+    # Audit log entry
+    from backend.routers.auth import get_stored_admin_user, request as req_module
+    actor_id = int(get_stored_admin_user().get("id", 0)) if get_stored_admin_user() else 0
+    actor_ip = req_module.remote_addr or "unknown"
+    cr = conn.cursor()
+    cr.execute(
+        """
+            INSERT INTO geofence_audit
+                (actor_id, old_latitude, old_longitude, old_radius_meters,
+                 old_work_start_time, new_latitude, new_longitude, new_radius_meters,
+                 new_work_start_time, changed_at, actor_ip)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            actor_id, old_lat, old_lon, old_rad, old_start,
+            payload.latitude, payload.longitude, payload.radius_meters,
+            work_start_time, now, actor_ip
+        ))
     conn.commit()
 
     cursor.execute("SELECT * FROM geofence_settings ORDER BY id DESC LIMIT 1")
@@ -113,7 +187,8 @@ def update_geofence(payload: GeofenceUpdate):
     return {
         "status": "success",
         "message": "Workplace geofence successfully updated",
-        "geofence": GeofenceModel.to_dict(row)
+        "geofence": GeofenceModel.to_dict(row),
+        "version": row["updated_at"]
     }
 
 
@@ -152,6 +227,24 @@ def get_admin_metrics(
         raise HTTPException(status_code=422, detail=str(exc))
 
 
+def _paginate_records(
+    records: list,
+    page: int,
+    page_size: int
+) -> dict:
+    """Slice a record list and return it with pagination metadata."""
+    total = len(records)
+    total_pages = (total + page_size - 1) // page_size
+    start = (page - 1) * page_size
+    return {
+        "records": records[start:start + page_size],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "total_pages": total_pages,
+    }
+
+
 @router.get("/records", dependencies=[Depends(require_admin)])
 def get_attendance_records(
     response: Response,
@@ -163,12 +256,16 @@ def get_attendance_records(
     status: Optional[str] = Query(None, description="Filter by status: CLOCKED_IN, CLOCKED_OUT, or NOT_CLOCKED_IN/ABSENT."),
     late_only: bool = Query(False, description="Return only late arrivals."),
     search: Optional[str] = Query(None, description="Search employee name or staff ID."),
-    view: Optional[str] = Query(None, description="View mode: 'roster' (complete live roster for all staff) or 'history' (logged sessions only)")
+    view: Optional[str] = Query(None, description="View mode: 'roster' (complete live roster for all staff) or 'history' (logged sessions only)"),
+    page: Optional[int] = Query(None, ge=1, description="Page number (1-based). Enables the paginated response envelope."),
+    page_size: Optional[int] = Query(None, ge=1, le=200, description="Rows per page (1-200, default 50).")
 ):
     """
     Retrieve attendance records.
     - When view='roster' (or by default for today's live monitoring): returns the complete status of all staff members.
     - When view='history' or when querying date ranges: returns logged clock-in / clock-out session events.
+    - Pass page/page_size to receive a paginated envelope; without them the
+      legacy bare list response is preserved for existing clients.
     """
     response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -179,36 +276,44 @@ def get_attendance_records(
         if day and (start or end):
             raise ValueError("Use either 'date' or 'start_date'/'end_date', not both.")
 
+        normalized_status = status.strip().upper() if status else None
+        allowed_statuses = set(VALID_STATUSES) | {"NOT_CLOCKED_IN", "ABSENT"}
+        if normalized_status and normalized_status not in allowed_statuses:
+            raise ValueError(
+                f"Invalid status '{status}'. Expected one of: {', '.join(sorted(allowed_statuses))}."
+            )
+
+        normalized_department = department.strip() if department else None
+        normalized_search = search.strip() if search else None
+
         # If live roster view is requested (or default single-day monitoring when not querying historical ranges/employee)
         today_str = get_today_str()
         is_today_or_single_day = (day is not None and not start and not end and not employee_id) or (date is None and not start and not end and not employee_id)
         if view == "roster" or (view != "history" and is_today_or_single_day):
             target_day = day or today_str
-            return fetch_daily_roster(
+            records = fetch_daily_roster(
                 date=target_day,
-                department=department,
-                status=status,
+                department=normalized_department,
+                status=normalized_status,
                 late_only=late_only,
-                search=search
+                search=normalized_search
             )
-
-        if status and status.upper() not in VALID_STATUSES:
-            raise ValueError(
-                f"Invalid status '{status}'. Expected one of: {', '.join(VALID_STATUSES)}."
+        else:
+            records = fetch_attendance_records(
+                date=day, start_date=start, end_date=end,
+                employee_id=employee_id,
+                department=normalized_department,
+                status=normalized_status,
+                late_only=late_only,
+                search=normalized_search
             )
-
-        records = fetch_attendance_records(
-            date=day, start_date=start, end_date=end,
-            employee_id=employee_id,
-            department=department,
-            status=status.upper() if status else None,
-            late_only=late_only,
-            search=search
-        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    return [AttendanceModel.to_dict(record) for record in records]
+    serialized = [AttendanceModel.to_dict(record) for record in records]
+    if page is not None or page_size is not None:
+        return _paginate_records(serialized, page or 1, page_size or 50)
+    return serialized
 
 
 
@@ -226,10 +331,11 @@ def _validate_export_filters(date, start_date, end_date, status):
 
     normalized_status = None
     if status:
-        normalized_status = status.upper()
-        if normalized_status not in VALID_STATUSES:
+        normalized_status = status.strip().upper()
+        allowed_statuses = set(VALID_STATUSES) | {"NOT_CLOCKED_IN", "ABSENT"}
+        if normalized_status not in allowed_statuses:
             raise ValueError(
-                f"Invalid status '{status}'. Expected one of: {', '.join(VALID_STATUSES)}."
+                f"Invalid status '{status}'. Expected one of: {', '.join(sorted(allowed_statuses))}."
             )
 
     return day, start, end, normalized_status
@@ -253,7 +359,8 @@ def download_attendance_csv(
     employee_id: Optional[int] = Query(None, description="Filter by employee primary ID."),
     department: Optional[str] = Query(None, description="Filter by department (case-insensitive)."),
     status: Optional[str] = Query(None, description="Filter by status: CLOCKED_IN or CLOCKED_OUT."),
-    late_only: bool = Query(False, description="Export only late arrivals.")
+    late_only: bool = Query(False, description="Export only late arrivals."),
+    search: Optional[str] = Query(None, description="Search employee name or staff ID.")
 ):
     """Stream the attendance log as a downloadable CSV file (supports custom date ranges)."""
     try:
@@ -269,7 +376,7 @@ def download_attendance_csv(
         stream_attendance_csv(
             date=day, start_date=start, end_date=end,
             employee_id=employee_id, department=department,
-            status=normalized_status, late_only=late_only
+            status=normalized_status, late_only=late_only, search=search
         ),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}
@@ -284,7 +391,8 @@ def download_attendance_json(
     employee_id: Optional[int] = Query(None, description="Filter by employee primary ID."),
     department: Optional[str] = Query(None, description="Filter by department (case-insensitive)."),
     status: Optional[str] = Query(None, description="Filter by status: CLOCKED_IN or CLOCKED_OUT."),
-    late_only: bool = Query(False, description="Export only late arrivals.")
+    late_only: bool = Query(False, description="Export only late arrivals."),
+    search: Optional[str] = Query(None, description="Search employee name or staff ID.")
 ):
     """Export the filtered attendance log as JSON (supports custom date ranges)."""
     try:
@@ -297,7 +405,7 @@ def download_attendance_json(
     return export_attendance_json(
         date=day, start_date=start, end_date=end,
         employee_id=employee_id, department=department,
-        status=normalized_status, late_only=late_only
+        status=normalized_status, late_only=late_only, search=search
     )
 
 

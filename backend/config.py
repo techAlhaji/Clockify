@@ -18,6 +18,19 @@ def get_current_time_str() -> str:
     """Returns current time formatted as HH:MM:SS in WAT"""
     return get_now().strftime("%H:%M:%S")
 
+def get_timezone_offset() -> str:
+    """Returns the workplace timezone offset string, e.g. '+01:00' for WAT (UTC+1)."""
+    # WAT is UTC+1, format as +HH:MM
+    from datetime import timezone, timedelta
+    wat = timezone(timedelta(hours=1))
+    utc_now = datetime.now(timezone.utc)
+    offset = utc_now.utcoffset(wat)
+    total_seconds = int(offset.total_seconds())
+    hours = total_seconds // 3600
+    minutes = abs(total_seconds % 3600) // 60
+    sign = '+' if hours >= 0 else '-'
+    return f"{sign}{abs(hours):02d}:{minutes:02d}"
+
 # Base Paths
 BASE_DIR = Path(__file__).resolve().parent.parent
 

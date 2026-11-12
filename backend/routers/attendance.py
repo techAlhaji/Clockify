@@ -271,11 +271,21 @@ def get_daily_status(
     conn.close()
 
     if not record:
-        return {"status": "NOT_CLOCKED_IN", "date": query_date, "record": None}
+        # Return server time and timezone even when not clocked in
+        from backend.config import get_current_time_str, get_timezone_offset
+        return {
+            "status": "NOT_CLOCKED_IN",
+            "date": query_date,
+            "server_time": get_current_time_str(),
+            "timezone_offset": get_timezone_offset(),
+            "record": None,
+        }
 
     return {
         "status": record["status"],
         "date": query_date,
+        "server_time": get_current_time_str(),
+        "timezone_offset": get_timezone_offset(),
         "record": AttendanceModel.to_dict(record),
     }
 

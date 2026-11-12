@@ -191,7 +191,8 @@ def _create_tables(cursor):
             clock_out_distance DOUBLE PRECISION,
             status TEXT NOT NULL,
             is_late INTEGER DEFAULT 0,
-            notes TEXT
+            notes TEXT,
+            clock_intent_id TEXT UNIQUE
         )""")
 
     # Old SQLite files were created before the is_admin column existed: add it if missing.
