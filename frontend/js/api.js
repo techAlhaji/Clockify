@@ -159,19 +159,21 @@ const ApiClient = {
     return this.get(`/api/attendance/history/${employeeId}`);
   },
 
-  clockIn(latitude, longitude, accuracy) {
-    return this.post("/api/attendance/clock-in", { latitude, longitude, accuracy });
-  },
+  clockIn(latitude, longitude, accuracy, clockIntentId) {
+    return this.post("/api/attendance/clock-in", { latitude, longitude, accuracy, clock_intent_id: clockIntentId });
+  }
 
   clockOut(latitude, longitude, accuracy) {
     return this.post("/api/attendance/clock-out", { latitude, longitude, accuracy });
-  },
+  }
 
   // Admin Endpoints
   getGeofence() {
     return this.get("/api/admin/geofence");
-  },
+  }
 
+  // Geofence updates require admin authentication; employee portal must never write.
+  // A 403 is final — never retry a geofence write from the employee portal.
   updateGeofence(payload) {
     return this.put("/api/admin/geofence", payload);
   },

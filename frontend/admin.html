@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="manifest" href="/manifest.json">
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="stylesheet" href="/static/css/admin.css">
 </head>
@@ -400,6 +401,19 @@
   <div class="toast-container" id="toastContainer" aria-live="polite"></div>
 
   <!-- JavaScript modules -->
+  <script>
+  // Register service worker for offline-tolerant clocking
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/static/js/sw.js')
+      .then((registration) => {
+        console.log('Service worker registered:', registration.scope);
+      })
+      .catch((err) => {
+        console.error('Service worker registration failed:', err);
+      });
+  }
+</script>
+
   <script src="/static/js/api.js"></script>
   <script src="/static/js/geo.js"></script>
   <script src="/static/js/admin.js"></script>

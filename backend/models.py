@@ -41,7 +41,8 @@ class AttendanceModel:
             "clock_out_distance": row["clock_out_distance"],
             "status": row["status"],
             "is_late": bool(row["is_late"]),
-            "notes": row["notes"]
+            "notes": row["notes"],
+            "clock_intent_id": row["clock_intent_id"]
         }
 
 class GeofenceModel:

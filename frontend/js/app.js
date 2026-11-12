@@ -61,6 +61,7 @@ const elements = {
 async function init() {
   startClock();
   setupEventListeners();
+  await initDB();
 
   try {
     // 1. Fetch Geofence Settings
@@ -178,29 +179,40 @@ function maybeShowSkewWarning(skewMinutes) {
   }
 }
 
-function getShiftLockKey(employeeId, dateStr = getLocalDateString()) {
-  return `clockify_shift_lock_${employeeId}_${dateStr}`;
+// Shift lock is keyed by employee_id + server date from /api/attendance/status.
+// This ensures the lock survives across device timezones/changes and page refreshes.
+// Local storage only stores a cache for instant paint; the server status always wins.
+let shiftLockCache = {};
+
+function getShiftLockKey(employeeId, serverDate) {
+  return `clockify_shift_lock_${employeeId}_${serverDate}`;
 }
 
-function getShiftLock(employeeId, dateStr = getLocalDateString()) {
+function getShiftLock(employeeId, serverDate) {
+  // Check local cache first (populated from server on refresh)
+  if (shiftLockCache[getShiftLockKey(employeeId, serverDate)]) {
+    return shiftLockCache[getShiftLockKey(employeeId, serverDate)];
+  }
+  // Fall back to localStorage only if no server data available
   try {
-    const raw = localStorage.getItem(getShiftLockKey(employeeId, dateStr));
+    const raw = localStorage.getItem(getShiftLockKey(employeeId, serverDate));
     return raw ? JSON.parse(raw) : null;
   } catch (e) {
     return null;
   }
 }
 
-function saveShiftLock(employeeId, status, record, dateStr = getLocalDateString()) {
+function saveShiftLock(employeeId, status, record, serverDate) {
   try {
     const payload = {
       employee_id: employeeId,
       status: status,
-      date: dateStr,
+      date: serverDate,
       record: record,
       locked_at: new Date().toISOString()
     };
-    localStorage.setItem(getShiftLockKey(employeeId, dateStr), JSON.stringify(payload));
+    shiftLockCache[getShiftLockKey(employeeId, serverDate)] = payload;
+    localStorage.setItem(getShiftLockKey(employeeId, serverDate), JSON.stringify(payload));
   } catch (e) {
     console.error("Failed to save shift lock:", e);
   }
@@ -221,13 +233,37 @@ async function refreshShiftData() {
     AppState.serverTime = statusData.server_time;
     AppState.timezoneOffset = statusData.timezone_offset;
 
-    // Use the server's date, not the device date, for the shift lock key.
+    // Use the server's date from the status response for the shift lock key.
     // This ensures the lock survives across device timezones/changes and refreshes.
-    const lockDate = statusData.date || getLocalDateString();
+    const lockDate = statusData.date || (statusData.server_time ? 
+      // Parse server date from server_time (HH:MM:SS in WAT/UTC+1)
+      // We use the date portion from the status API response; if only time is provided,
+      // we defer to the server's concept of the current day.
+      null : null);
 
     if (statusData.status === "CLOCKED_IN" || statusData.status === "CLOCKED_OUT") {
-      saveShiftLock(empId, statusData.status, statusData.record, lockDate);
+      // If statusData.date is provided, use it; otherwise compute from server time
+      const effectiveLockDate = statusData.date || AppState.todayRecord?.date || 
+        // If we have no date from server, we rely on the refresh cycle to provide it
+        // and keep lockDate as null (will be re-fetched on next refresh)
+        null;
+      saveShiftLock(empId, statusData.status, statusData.record, effectiveLockDate);
     }
+
+    // Show clock-skew warning if server time differs from device by more than 2 min
+    maybeShowSkewWarning(statusData.server_time || "");
+
+    updateActionControls();
+    updateTodaySummary();
+
+    const historyData = await ApiClient.getHistory(empId);
+    renderHistory(historyData);
+  } catch (err) {
+    console.error("Failed to refresh shift:", err);
+    if ((err.message || "").toLowerCase().includes("session")) {
+      handleSessionExpired();
+    }
+  }
 
     // Show clock-skew warning if server time differs from device by more than 2 min
     maybeShowSkewWarning(statusData.server_time || "");
@@ -259,11 +295,11 @@ function updateActionControls() {
     elements.actionBtnText.textContent = "Clock Out";
     elements.btnAction.disabled = false;
     elements.btnAction.classList.add("btn-clock-out");
-    elements.btnAction.onclick = handleClockOut;
+    elements.btnAction.onclick = () => handleClockOut();
   } else {
     elements.actionBtnText.textContent = "Clock In Now";
     elements.btnAction.disabled = false;
-    elements.btnAction.onclick = handleClockIn;
+    elements.btnAction.onclick = () => handleClockIn(clockIntentId);
   }
 }
 
@@ -360,11 +396,17 @@ function updateDistanceRadar(lat, lon, accuracy) {
 }
 
 // Handle Clock In
-async function handleClockIn() {
+// The server is the source of truth for the attendance day.
+// We pass the clockIntentId for idempotency — if a record already exists
+// for this intent, the server returns it and reconciles instead of erroring.
+async function handleClockIn(clockIntentId) {
   if (!AppState.currentEmployee) return;
   const empId = AppState.currentEmployee.id;
-  const today = getLocalDateString();
-  const lock = getShiftLock(empId, today);
+
+  // Use the cached shift status and todayRecord from refreshShiftData,
+  // which are keyed by the server date. Do NOT use getLocalDateString().
+  const todayRecord = AppState.todayRecord;
+  const lock = todayRecord ? getShiftLock(empId, todayRecord.date) : null;
 
   if (AppState.shiftStatus === "CLOCKED_OUT" || (lock && lock.status === "CLOCKED_OUT")) {
     showToast("Shift already completed for today. You cannot clock in again.", "warning");
@@ -388,14 +430,35 @@ async function handleClockIn() {
     AppState.currentLocation = loc;
     updateDistanceRadar(loc.latitude, loc.longitude, loc.accuracy);
 
+    // Check if we're online before attempting to clock in
+    if (!navigator.onLine) {
+      // Queue the clock-in event for offline submission
+      const event = {
+        type: 'clock-in',
+        employeeId: empId,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        accuracy: loc.accuracy,
+        clockIntentId: clockIntentId
+      };
+      const queuedId = await queueClockEvent(event);
+      elements.actionBtnText.textContent = "Clocking In (Pending)...";
+      showToast("Clocking in offline — record will be saved when you're back online.", "info");
+      // Try to queue and then attempt sync when back online
+      await queueClockEvent(event);
+      return;
+    }
+
     elements.actionBtnText.textContent = "Clocking In...";
     const res = await ApiClient.clockIn(
       loc.latitude,
       loc.longitude,
-      loc.accuracy
+      loc.accuracy,
+      clockIntentId
     );
 
-    saveShiftLock(empId, "CLOCKED_IN", res.record, today);
+    // Server may return the existing record if clockIntentId matches one from a prior offline attempt.
+    saveShiftLock(empId, "CLOCKED_IN", res.record, res.record?.date || AppState.todayRecord?.date);
     AppState.shiftStatus = "CLOCKED_IN";
     AppState.todayRecord = res.record;
     updateActionControls();
@@ -404,7 +467,23 @@ async function handleClockIn() {
     showToast(`Arrival verified! Clocked in at ${res.record.clock_in_time}`, "success");
     await refreshShiftData();
   } catch (err) {
-    showToast(err.message, "error");
+    const msg = (err.message || "").toLowerCase();
+    // If we got a server error (not network), check if it's a duplicate intent
+    if (!navigator.onLine || msg.includes('duplicate') || msg.includes('already exists')) {
+      // If offline or server says duplicate, queue for retry
+      const event = {
+        type: 'clock-in',
+        employeeId: empId,
+        latitude: AppState.currentLocation?.latitude || 0,
+        longitude: AppState.currentLocation?.longitude || 0,
+        accuracy: AppState.currentLocation?.accuracy || 0,
+        clockIntentId: clockIntentId
+      };
+      await queueClockEvent(event);
+      showToast("Clock-in queued for retry when back online.", "warning");
+    } else {
+      showToast(err.message, "error");
+    }
     updateActionControls();
   }
 }
@@ -413,8 +492,11 @@ async function handleClockIn() {
 async function handleClockOut() {
   if (!AppState.currentEmployee) return;
   const empId = AppState.currentEmployee.id;
-  const today = getLocalDateString();
-  const lock = getShiftLock(empId, today);
+
+  // Use the cached shift status and todayRecord from refreshShiftData,
+  // which are keyed by the server date. Do NOT use getLocalDateString().
+  const todayRecord = AppState.todayRecord;
+  const lock = todayRecord ? getShiftLock(empId, todayRecord.date) : null;
 
   if (AppState.shiftStatus === "CLOCKED_OUT" || (lock && lock.status === "CLOCKED_OUT")) {
     showToast("Shift already completed for today.", "info");
@@ -430,6 +512,22 @@ async function handleClockOut() {
     const loc = await GeoService.getCurrentPosition();
     AppState.currentLocation = loc;
 
+    // Check if we're online before attempting to clock out
+    if (!navigator.onLine) {
+      // Queue the clock-out event for offline submission
+      const event = {
+        type: 'clock-out',
+        employeeId: empId,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        accuracy: loc.accuracy
+      };
+      const queuedId = await queueClockEvent(event);
+      elements.actionBtnText.textContent = "Clocking Out (Pending)...";
+      showToast("Clocking out offline — record will be saved when you're back online.", "info");
+      return;
+    }
+
     elements.actionBtnText.textContent = "Clocking Out...";
     const res = await ApiClient.clockOut(
       loc.latitude,
@@ -437,7 +535,7 @@ async function handleClockOut() {
       loc.accuracy
     );
 
-    saveShiftLock(empId, "CLOCKED_OUT", res.record, today);
+    saveShiftLock(empId, "CLOCKED_OUT", res.record, res.record?.date || AppState.todayRecord?.date);
     AppState.shiftStatus = "CLOCKED_OUT";
     AppState.todayRecord = res.record;
     updateActionControls();
@@ -446,12 +544,35 @@ async function handleClockOut() {
     showToast(`Departure recorded at ${res.record.clock_out_time}. Shift completed!`, "success");
     await refreshShiftData();
   } catch (err) {
-    showToast(err.message, "error");
+    const msg = (err.message || "").toLowerCase();
+    // If we got a server error, queue for retry
+    if (!navigator.onLine || msg.includes('duplicate') || msg.includes('already exists')) {
+      const event = {
+        type: 'clock-out',
+        employeeId: empId,
+        latitude: AppState.currentLocation?.latitude || 0,
+        longitude: AppState.currentLocation?.longitude || 0,
+        accuracy: AppState.currentLocation?.accuracy || 0
+      };
+      await queueClockEvent(event);
+      showToast("Clock-out queued for retry when back online.", "warning");
+    } else {
+      showToast(err.message, "error");
+    }
     updateActionControls();
   }
 }
 
 // Event Listeners & Auth Handlers
+// A clock intent ID is generated per clock-in attempt to ensure idempotency.
+// It is stored in localStorage so that if the user goes offline and comes back online,
+// the same intent ID can be reused to avoid creating duplicate records.
+let clockIntentId = localStorage.getItem('clockify_clock_intent_id');
+if (!clockIntentId) {
+  clockIntentId = 'clockify-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+  localStorage.setItem('clockify_clock_intent_id', clockIntentId);
+}
+
 function setupEventListeners() {
   // 1. Selector dropdown changes: auto-fill Staff ID
   if (elements.loginEmployeeSelect) {
@@ -522,6 +643,13 @@ function setupEventListeners() {
       if (elements.loginPin) elements.loginPin.value = '';
       showLoginGate();
       showToast('You have securely signed out of your portal.', 'info');
+      // Clear the clock intent ID on logout so a fresh session starts clean
+      localStorage.removeItem('clockify_clock_intent_id');
+      clockIntentId = localStorage.getItem('clockify_clock_intent_id');
+      if (!clockIntentId) {
+        clockIntentId = 'clockify-' + Date.now() + '-' + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem('clockify_clock_intent_id', clockIntentId);
+      }
     });
   }
 }
@@ -559,3 +687,104 @@ function showToast(message, type = 'info') {
 
 // Run on page load
 document.addEventListener("DOMContentLoaded", init);
+
+// Online/offline event listeners for clock event retry
+window.addEventListener('online', async () => {
+  console.log('Network is back online, retrying queued clock events...');
+  const pendingEvents = await getPendingEvents();
+  for (const event of pendingEvents) {
+    try {
+      const url = event.type === 'clock-in'
+        ? '/api/attendance/clock-in'
+        : '/api/attendance/clock-out';
+
+      const payload = {
+        latitude: event.latitude,
+        longitude: event.longitude,
+        accuracy: event.accuracy,
+        clock_intent_id: event.clockIntentId
+      };
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (response.ok) {
+        await updateEventStatus(event.id, 'synced');
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        await updateEventStatus(event.id, 'failed', errorData.detail || 'Request failed');
+      }
+    } catch (err) {
+      await updateEventStatus(event.id, 'failed', err.message);
+    }
+  }
+});
+
+function queueClockEvent(event) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('clock-queue', 'readwrite');
+    const store = transaction.objectStore('clock-queue');
+    const request = store.add({
+      ...event,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+      attempts: 0
+    });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function getPendingEvents() {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('clock-queue', 'readonly');
+    const store = transaction.objectStore('clock-queue');
+    const request = store.getAll(event => event.status === 'pending');
+    request.onsuccess = () => resolve(request.result || []);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function updateEventStatus(id, status, error = null) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('clock-queue', 'readwrite');
+    const store = transaction.objectStore('clock-queue');
+    const request = store.get(id);
+    request.onsuccess = async () => {
+      const event = request.result;
+      if (event) {
+        event.status = status;
+        event.error = error;
+        event.attempts += 1;
+        const updateRequest = store.put(event);
+        updateRequest.onsuccess = () => resolve(event);
+        updateRequest.onerror = () => reject(updateRequest.error);
+      } else {
+        reject(new Error('Event not found'));
+      }
+    };
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function deleteEvent(id) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction('clock-queue', 'readwrite');
+    const store = transaction.objectStore('clock-queue');
+    const request = store.delete(id);
+    request.onsuccess = () => resolve();
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function backoffDelay(attempts) {
+  const base = 1000;
+  const jitter = Math.random() * 1000;
+  const delay = base * Math.pow(2, Math.min(attempts, 5)) + jitter;
+  return Math.min(delay, 30000);
+}

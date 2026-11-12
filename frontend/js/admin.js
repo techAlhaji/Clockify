@@ -410,7 +410,13 @@ async function requestGeofenceChange() {
     const response = await ApiClient.updateGeofence(payload);
     showToast("Geofence updated. Change logged and propagated to all admins.", "success");
   } catch (err) {
-    showToast(err.message || "Failed to update geofence", "error");
+    const msg = (err.message || "").toLowerCase();
+    // Treat 403 Forbidden as final — employee portals must never retry geofence writes.
+    if (msg.includes("forbidden") || msg.includes("unauthorized") || msg.includes("access denied")) {
+      showToast("Geofence update denied. This is a trust boundary violation. Contact admin.", "error");
+    } else {
+      showToast(err.message || "Failed to update geofence", "error");
+    }
   }
 }
 
@@ -796,13 +802,19 @@ function setupAdminListeners() {
           work_start_time: adminElements.workStartTime.value || "09:00"
         };
 
-        await ApiClient.updateGeofence(payload);
+        const response = await ApiClient.updateGeofence(payload);
         if (adminElements.geofenceSaveText) {
           adminElements.geofenceSaveText.textContent = `Permanent perimeter active: ${pos.latitude.toFixed(5)}, ${pos.longitude.toFixed(5)}`;
         }
         showToast("Geofence updated from GPS location. Change logged and propagated to all admins.", "success");
       } catch (err) {
-        showToast(err.message, "error");
+        const msg = (err.message || "").toLowerCase();
+        // Treat 403 Forbidden as final — employee portals must never retry geofence writes.
+        if (msg.includes("forbidden") || msg.includes("unauthorized") || msg.includes("access denied")) {
+          showToast("Geofence update denied. This is a trust boundary violation. Contact admin.", "error");
+        } else {
+          showToast(err.message, "error");
+        }
       }
     });
   }
