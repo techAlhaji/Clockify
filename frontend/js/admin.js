@@ -85,18 +85,27 @@ function getLocalDateString(d = new Date()) {
   return `${y}-${m}-${day}`;
 }
 
+// The admin session lives in sessionStorage only, so it disappears when the tab closes
+// and is never left behind on a shared machine.
 function getStoredAdminToken() {
-  const raw = localStorage.getItem(STORAGE_KEY_ADMIN_TOKEN) || sessionStorage.getItem(STORAGE_KEY_ADMIN_TOKEN);
+  const raw = sessionStorage.getItem(STORAGE_KEY_ADMIN_TOKEN);
   return raw ? raw.replace(/^["']|["']$/g, '').trim() : null;
 }
 
 function getStoredAdminUser() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY_ADMIN_USER) || sessionStorage.getItem(STORAGE_KEY_ADMIN_USER);
+    const raw = sessionStorage.getItem(STORAGE_KEY_ADMIN_USER);
     return raw ? JSON.parse(raw) : null;
   } catch (e) {
     return null;
   }
+}
+
+// Escape untrusted values before they reach innerHTML.
+function esc(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[ch]));
 }
 
 // Initialize Admin Portal
@@ -413,11 +422,11 @@ function renderAttendanceTable(records) {
 
     // Time cell formatting
     const inCell = r.clock_in_time
-      ? `<span class="td-time">${r.clock_in_time}</span>`
+      ? `<span class="td-time">${esc(r.clock_in_time)}</span>`
       : `<span class="td-time td-na">—</span>`;
 
     const outCell = r.clock_out_time
-      ? `<span class="td-time">${r.clock_out_time}</span>`
+      ? `<span class="td-time">${esc(r.clock_out_time)}</span>`
       : `<span class="td-time td-na">—</span>`;
 
     const gps = r.clock_in_distance != null
@@ -449,19 +458,19 @@ function renderAttendanceTable(records) {
     return `<tr>
       <td>
         <div class="td-emp">
-          <div class="td-av">${initials(name)}</div>
+          <div class="td-av">${esc(initials(name))}</div>
           <div>
-            <div class="td-name">${name}</div>
-            ${dept ? `<div class="td-dept">${dept}</div>` : ''}
+            <div class="td-name">${esc(name)}</div>
+            ${dept ? `<div class="td-dept">${esc(dept)}</div>` : ''}
           </div>
         </div>
       </td>
-      <td style="white-space:nowrap;color:var(--t2);font-size:.84rem;">${r.date || 'Today'}</td>
+      <td style="white-space:nowrap;color:var(--t2);font-size:.84rem;">${esc(r.date || 'Today')}</td>
       <td>${inCell}${gps}</td>
       <td>${outCell}</td>
       <td>${statusChip}</td>
       <td>${punctualityChip}</td>
-      <td style="font-size:.78rem;color:var(--t3);">${notesText}</td>
+      <td style="font-size:.78rem;color:var(--t3);">${esc(notesText)}</td>
     </tr>`;
   }).join('');
 }
@@ -483,9 +492,7 @@ function stopLivePolling() {
 
 function handleAdminLogout() {
   stopLivePolling();
-  localStorage.removeItem(STORAGE_KEY_ADMIN_TOKEN);
   sessionStorage.removeItem(STORAGE_KEY_ADMIN_TOKEN);
-  localStorage.removeItem(STORAGE_KEY_ADMIN_USER);
   sessionStorage.removeItem(STORAGE_KEY_ADMIN_USER);
   showAdminLoginGate();
   showToast("Signed out of Admin Console.", "info");
@@ -519,9 +526,8 @@ function setupAdminListeners() {
         const token = response.token;
         const user = response.user;
 
-        localStorage.setItem(STORAGE_KEY_ADMIN_TOKEN, token);
         sessionStorage.setItem(STORAGE_KEY_ADMIN_TOKEN, token);
-        localStorage.setItem(STORAGE_KEY_ADMIN_USER, JSON.stringify(user));
+        sessionStorage.setItem(STORAGE_KEY_ADMIN_USER, JSON.stringify(user));
 
         showAdminDashboardUI();
         await loadDepartmentOptions();
@@ -730,24 +736,27 @@ function setupAdminListeners() {
     });
   }
 
-  // Export CSV with the active filters and an attached token
+  // Export CSV with the active filters; the credential stays in the Authorization header
   if (adminElements.btnExportCsv) {
-    adminElements.btnExportCsv.addEventListener("click", () => {
+    adminElements.btnExportCsv.addEventListener("click", async () => {
       const filters = getFilterState();
-      const token = getStoredAdminToken();
-      const params = new URLSearchParams();
-      if (token) params.append("token", token);
-      if (filters.search) {
-        params.append("search", filters.search);
-      } else if (selectedFilterDate) {
-        params.append("date", selectedFilterDate);
+      const date = filters.search
+        ? null
+        : ((currentViewMode === "roster" || currentViewMode === "custom_date")
+          ? (selectedFilterDate || "today")
+          : null);
+      try {
+        await ApiClient.exportCsv({
+          date,
+          search: filters.search,
+          department: filters.department,
+          status: (filters.status === "CLOCKED_IN" || filters.status === "CLOCKED_OUT") ? filters.status : "",
+          lateOnly: filters.lateOnly,
+        });
+        showToast("CSV export downloaded.", "success");
+      } catch (err) {
+        showToast(err.message, "error");
       }
-      if (filters.department) params.append("department", filters.department);
-      if (filters.status === "CLOCKED_IN" || filters.status === "CLOCKED_OUT") {
-        params.append("status", filters.status);
-      }
-      if (filters.lateOnly) params.append("late_only", "true");
-      window.open(`${window.location.origin}/api/admin/export/csv?${params.toString()}`, "_blank");
     });
   }
 
@@ -781,7 +790,8 @@ function showToast(message, type = 'info') {
   if (!adminElements.toastContainer) return;
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.innerHTML = `<div class="t-icon">${ADMIN_ICONS[type] || 'ℹ'}</div><span>${message}</span>`;
+  toast.innerHTML = `<div class="t-icon">${ADMIN_ICONS[type] || 'ℹ'}</div><span></span>`;
+  toast.querySelector('span').textContent = message;
   adminElements.toastContainer.appendChild(toast);
   setTimeout(() => {
     toast.style.opacity = '0';
