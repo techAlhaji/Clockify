@@ -83,6 +83,10 @@ class PgCursor:
         cols = self._columns()
         return [DictRow(cols, row) for row in self._cur.fetchall()]
 
+    def fetchmany(self, size=1):
+        cols = self._columns()
+        return [DictRow(cols, row) for row in self._cur.fetchmany(size)]
+
     @property
     def rowcount(self):
         return self._cur.rowcount
@@ -199,6 +203,15 @@ def _create_tables(cursor):
         cursor.execute("PRAGMA table_info(employees)")
         if "is_admin" not in [col[1] for col in cursor.fetchall()]:
             cursor.execute("ALTER TABLE employees ADD COLUMN is_admin INTEGER DEFAULT 0")
+
+    # Keep filtered record listings and exports index-backed as the table grows.
+    for statement in (
+        "CREATE INDEX IF NOT EXISTS idx_attendance_date ON attendance_records(date)",
+        "CREATE INDEX IF NOT EXISTS idx_attendance_employee_date ON attendance_records(employee_id, date)",
+        "CREATE INDEX IF NOT EXISTS idx_attendance_status ON attendance_records(status)",
+        "CREATE INDEX IF NOT EXISTS idx_employees_name ON employees(name)",
+    ):
+        cursor.execute(statement)
 
 
 def _seed(cursor):

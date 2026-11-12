@@ -283,13 +283,12 @@ def get_daily_status(
 @router.get("/history/{employee_id}")
 def get_employee_history(
     employee_id: int,
-    limit: int = 10,
+    limit: int = Query(10, ge=1, le=100),
     authenticated_employee_id: int = Depends(require_employee),
 ):
     """Retrieve recent attendance history for the authenticated employee only."""
     if employee_id != authenticated_employee_id:
         raise HTTPException(status_code=403, detail="You may only view your own attendance history.")
-
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute(

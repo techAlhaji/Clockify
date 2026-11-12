@@ -624,6 +624,57 @@ body.admin-body {
   width: 170px;
 }
 
+.filter-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--t2);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.filter-check input {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--brand);
+  cursor: pointer;
+}
+
+.tbl-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px 24px;
+  border-top: 1px solid var(--b2);
+}
+
+.tbl-pager-info {
+  font-size: 13px;
+  color: var(--t2);
+}
+
+.tbl-pager-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.tbl-pager-actions .btn-ghost {
+  height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+}
+
+.btn-ghost:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+
 .tbl-toolbar .btn-primary,
 .tbl-toolbar .btn-ghost {
   white-space: nowrap;

@@ -20,12 +20,17 @@ from backend.services.reports import (
     generate_daily_report,
     generate_range_report,
     fetch_attendance_records,
+    count_attendance_records,
     fetch_daily_roster,
+    count_daily_roster,
     stream_attendance_csv,
     export_attendance_json,
     validate_date,
     validate_date_range,
     VALID_STATUSES,
+    VALID_FILTER_STATUSES,
+    DEFAULT_PAGE_SIZE,
+    MAX_PAGE_SIZE,
 )
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
@@ -163,10 +168,12 @@ def get_attendance_records(
     status: Optional[str] = Query(None, description="Filter by status: CLOCKED_IN, CLOCKED_OUT, or NOT_CLOCKED_IN/ABSENT."),
     late_only: bool = Query(False, description="Return only late arrivals."),
     search: Optional[str] = Query(None, description="Search employee name or staff ID."),
-    view: Optional[str] = Query(None, description="View mode: 'roster' (complete live roster for all staff) or 'history' (logged sessions only)")
+    view: Optional[str] = Query(None, description="View mode: 'roster' (complete live roster for all staff) or 'history' (logged sessions only)"),
+    limit: int = Query(DEFAULT_PAGE_SIZE, ge=1, le=MAX_PAGE_SIZE, description=f"Rows per page (1-{MAX_PAGE_SIZE})."),
+    offset: int = Query(0, ge=0, description="Rows to skip.")
 ):
     """
-    Retrieve attendance records.
+    Retrieve attendance records, always paginated in SQL.
     - When view='roster' (or by default for today's live monitoring): returns the complete status of all staff members.
     - When view='history' or when querying date ranges: returns logged clock-in / clock-out session events.
     """
@@ -179,36 +186,68 @@ def get_attendance_records(
         if day and (start or end):
             raise ValueError("Use either 'date' or 'start_date'/'end_date', not both.")
 
+        normalized_department = department.strip() if department else None
+        normalized_search = search.strip() if search else None
+
+        normalized_status = None
+        if status:
+            normalized_status = status.strip().upper()
+            if normalized_status not in VALID_FILTER_STATUSES:
+                raise ValueError(
+                    f"Invalid status '{status}'. Expected one of: {', '.join(VALID_FILTER_STATUSES)}."
+                )
+
         # If live roster view is requested (or default single-day monitoring when not querying historical ranges/employee)
         today_str = get_today_str()
         is_today_or_single_day = (day is not None and not start and not end and not employee_id) or (date is None and not start and not end and not employee_id)
         if view == "roster" or (view != "history" and is_today_or_single_day):
             target_day = day or today_str
-            return fetch_daily_roster(
+            records = fetch_daily_roster(
                 date=target_day,
-                department=department,
-                status=status,
+                department=normalized_department,
+                status=normalized_status,
                 late_only=late_only,
-                search=search
+                search=normalized_search,
+                limit=limit,
+                offset=offset
             )
-
-        if status and status.upper() not in VALID_STATUSES:
-            raise ValueError(
-                f"Invalid status '{status}'. Expected one of: {', '.join(VALID_STATUSES)}."
+            total = count_daily_roster(
+                date=target_day,
+                department=normalized_department,
+                status=normalized_status,
+                late_only=late_only,
+                search=normalized_search
             )
-
-        records = fetch_attendance_records(
-            date=day, start_date=start, end_date=end,
-            employee_id=employee_id,
-            department=department,
-            status=status.upper() if status else None,
-            late_only=late_only,
-            search=search
-        )
+        else:
+            records = fetch_attendance_records(
+                date=day, start_date=start, end_date=end,
+                employee_id=employee_id,
+                department=normalized_department,
+                status=normalized_status,
+                late_only=late_only,
+                search=normalized_search,
+                limit=limit,
+                offset=offset
+            )
+            total = count_attendance_records(
+                date=day, start_date=start, end_date=end,
+                employee_id=employee_id,
+                department=normalized_department,
+                status=normalized_status,
+                late_only=late_only,
+                search=normalized_search
+            )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
 
-    return [AttendanceModel.to_dict(record) for record in records]
+    serialized = [AttendanceModel.to_dict(record) for record in records]
+    return {
+        "records": serialized,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "has_more": offset + len(serialized) < total,
+    }
 
 
 
@@ -253,7 +292,8 @@ def download_attendance_csv(
     employee_id: Optional[int] = Query(None, description="Filter by employee primary ID."),
     department: Optional[str] = Query(None, description="Filter by department (case-insensitive)."),
     status: Optional[str] = Query(None, description="Filter by status: CLOCKED_IN or CLOCKED_OUT."),
-    late_only: bool = Query(False, description="Export only late arrivals.")
+    late_only: bool = Query(False, description="Export only late arrivals."),
+    search: Optional[str] = Query(None, description="Search employee name or staff ID.")
 ):
     """Stream the attendance log as a downloadable CSV file (supports custom date ranges)."""
     try:
@@ -269,7 +309,7 @@ def download_attendance_csv(
         stream_attendance_csv(
             date=day, start_date=start, end_date=end,
             employee_id=employee_id, department=department,
-            status=normalized_status, late_only=late_only
+            status=normalized_status, late_only=late_only, search=search
         ),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={filename}"}

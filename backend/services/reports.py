@@ -26,6 +26,11 @@ CSV_HEADER = [
 ]
 
 VALID_STATUSES = ("CLOCKED_IN", "CLOCKED_OUT")
+VALID_FILTER_STATUSES = VALID_STATUSES + ("NOT_CLOCKED_IN", "ABSENT")
+
+MAX_PAGE_SIZE = 100
+DEFAULT_PAGE_SIZE = 25
+CSV_BATCH_SIZE = 500
 
 
 # ---------------------------------------------------------------------------
@@ -134,11 +139,14 @@ def fetch_attendance_records(
     department: Optional[str] = None,
     status: Optional[str] = None,
     late_only: bool = False,
-    search: Optional[str] = None
+    search: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0
 ) -> List[Dict[str, Any]]:
     """
     Retrieve attendance records (with employee details) matching the given
-    filters. Used by the JSON export and the admin records endpoint.
+    filters. ``limit``/``offset`` are applied in SQL so callers never load
+    more than one page of rows.
     """
     where_clause, params = build_attendance_query(
         date=date, start_date=start_date, end_date=end_date,
@@ -148,7 +156,7 @@ def fetch_attendance_records(
 
     conn = get_db()
     cursor = conn.cursor()
-    cursor.execute(f"""
+    sql = f"""
         SELECT a.id, a.employee_id, e.staff_id, e.name, e.department, a.date,
                a.clock_in_time, a.clock_in_lat, a.clock_in_lon, a.clock_in_distance,
                a.clock_out_time, a.clock_out_lat, a.clock_out_lon, a.clock_out_distance,
@@ -157,37 +165,94 @@ def fetch_attendance_records(
         JOIN employees e ON a.employee_id = e.id
         WHERE {where_clause}
         ORDER BY a.date DESC, a.clock_in_time DESC, a.id DESC
-    """, tuple(params))
+    """
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params = params + [limit, offset]
+    cursor.execute(sql, tuple(params))
     rows = cursor.fetchall()
     conn.close()
 
     return [dict(row) for row in rows]
 
 
-def fetch_daily_roster(
+def count_attendance_records(
     date: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    employee_id: Optional[int] = None,
     department: Optional[str] = None,
     status: Optional[str] = None,
     late_only: bool = False,
     search: Optional[str] = None
-) -> List[Dict[str, Any]]:
-    """
-    Returns the complete live attendance roster for ALL registered staff for the given date (default today).
-    Guarantees that all employees are accounted for with zero fluctuation:
-    - Active shifts are marked CLOCKED_IN
-    - Completed shifts are marked CLOCKED_OUT (Present)
-    - Employees not yet clocked in are marked NOT_CLOCKED_IN (Absent / Pending)
-    """
-    if not date or str(date).strip().lower() in ("today", "current"):
-        date_val = get_today_str()
-    else:
-        date_val = str(date).strip()
+) -> int:
+    """Count attendance records matching the same filters as fetch_attendance_records()."""
+    where_clause, params = build_attendance_query(
+        date=date, start_date=start_date, end_date=end_date,
+        employee_id=employee_id, department=department, status=status,
+        late_only=late_only, search=search
+    )
 
     conn = get_db()
     cursor = conn.cursor()
+    cursor.execute(f"""
+        SELECT COUNT(*)
+        FROM attendance_records a
+        JOIN employees e ON a.employee_id = e.id
+        WHERE {where_clause}
+    """, tuple(params))
+    total = cursor.fetchone()[0]
+    conn.close()
+    return int(total)
 
+
+def iter_attendance_records(**filters: Any) -> Iterator[Dict[str, Any]]:
+    """
+    Yield matching attendance rows in batches, holding only ``CSV_BATCH_SIZE``
+    rows in memory at a time. Used by the CSV export.
+    """
+    where_clause, params = build_attendance_query(
+        date=filters.get("date"),
+        start_date=filters.get("start_date"),
+        end_date=filters.get("end_date"),
+        employee_id=filters.get("employee_id"),
+        department=filters.get("department"),
+        status=filters.get("status"),
+        late_only=bool(filters.get("late_only")),
+        search=filters.get("search")
+    )
+
+    conn = get_db()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"""
+            SELECT a.id, a.employee_id, e.staff_id, e.name, e.department, a.date,
+                   a.clock_in_time, a.clock_in_lat, a.clock_in_lon, a.clock_in_distance,
+                   a.clock_out_time, a.clock_out_lat, a.clock_out_lon, a.clock_out_distance,
+                   a.status, COALESCE(a.is_late, 0) AS is_late, a.notes
+            FROM attendance_records a
+            JOIN employees e ON a.employee_id = e.id
+            WHERE {where_clause}
+            ORDER BY a.date DESC, a.clock_in_time DESC, a.id DESC
+        """, tuple(params))
+        while True:
+            batch = cursor.fetchmany(CSV_BATCH_SIZE)
+            if not batch:
+                break
+            for row in batch:
+                yield dict(row)
+    finally:
+        conn.close()
+
+
+def _roster_where(
+    department: Optional[str],
+    status: Optional[str],
+    late_only: bool,
+    search: Optional[str]
+) -> Tuple[str, List[Any]]:
     conditions = ["1=1"]
-    params: List[Any] = [date_val, date_val]
+    params: List[Any] = []
 
     if department:
         conditions.append("LOWER(e.department) = LOWER(?)")
@@ -208,7 +273,35 @@ def fetch_daily_roster(
         conditions.append("(LOWER(e.name) LIKE LOWER(?) OR LOWER(e.staff_id) LIKE LOWER(?))")
         params.extend([f"%{search}%", f"%{search}%"])
 
-    where_clause = " AND ".join(conditions)
+    return " AND ".join(conditions), params
+
+
+def fetch_daily_roster(
+    date: Optional[str] = None,
+    department: Optional[str] = None,
+    status: Optional[str] = None,
+    late_only: bool = False,
+    search: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: int = 0
+) -> List[Dict[str, Any]]:
+    """
+    Returns the complete live attendance roster for ALL registered staff for the given date (default today).
+    Guarantees that all employees are accounted for with zero fluctuation:
+    - Active shifts are marked CLOCKED_IN
+    - Completed shifts are marked CLOCKED_OUT (Present)
+    - Employees not yet clocked in are marked NOT_CLOCKED_IN (Absent / Pending)
+    """
+    if not date or str(date).strip().lower() in ("today", "current"):
+        date_val = get_today_str()
+    else:
+        date_val = str(date).strip()
+
+    where_clause, filter_params = _roster_where(department, status, late_only, search)
+    params: List[Any] = [date_val, date_val] + filter_params
+
+    conn = get_db()
+    cursor = conn.cursor()
 
     sql = f"""
         SELECT 
@@ -241,11 +334,43 @@ def fetch_daily_roster(
             END,
             e.id ASC
     """
+    if limit is not None:
+        sql += " LIMIT ? OFFSET ?"
+        params = params + [limit, offset]
     cursor.execute(sql, tuple(params))
     rows = cursor.fetchall()
     conn.close()
 
     return [dict(row) for row in rows]
+
+
+def count_daily_roster(
+    date: Optional[str] = None,
+    department: Optional[str] = None,
+    status: Optional[str] = None,
+    late_only: bool = False,
+    search: Optional[str] = None
+) -> int:
+    """Count roster rows matching the same filters as fetch_daily_roster()."""
+    if not date or str(date).strip().lower() in ("today", "current"):
+        date_val = get_today_str()
+    else:
+        date_val = str(date).strip()
+
+    where_clause, filter_params = _roster_where(department, status, late_only, search)
+    params: List[Any] = [date_val] + filter_params
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute(f"""
+        SELECT COUNT(*)
+        FROM employees e
+        LEFT JOIN attendance_records a ON e.id = a.employee_id AND a.date = ?
+        WHERE {where_clause}
+    """, tuple(params))
+    total = cursor.fetchone()[0]
+    conn.close()
+    return int(total)
 
 
 
@@ -376,7 +501,7 @@ def _format_csv_row(row: Dict[str, Any]) -> List[Any]:
 def stream_attendance_csv(**filters: Any) -> Iterator[str]:
     """
     Generator that yields the CSV export line-by-line so large reports can be
-    streamed without buffering the whole document in memory.
+    streamed without buffering the whole document or the whole result set.
     Accepts the same keyword filters as fetch_attendance_records().
     """
     buffer = io.StringIO()
@@ -387,7 +512,7 @@ def stream_attendance_csv(**filters: Any) -> Iterator[str]:
     buffer.seek(0)
     buffer.truncate(0)
 
-    for row in fetch_attendance_records(**filters):
+    for row in iter_attendance_records(**filters):
         writer.writerow(_format_csv_row(row))
         yield buffer.getvalue()
         buffer.seek(0)

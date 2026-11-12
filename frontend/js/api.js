@@ -163,11 +163,16 @@ const ApiClient = {
     return this.get(`/api/admin/metrics${q}`);
   },
 
-  getAdminRecords(date, employeeId, view) {
+  getAdminRecords({ date, view, search, department, status, lateOnly, limit, offset } = {}) {
     const params = new URLSearchParams();
     if (date) params.append("date", date);
-    if (employeeId) params.append("employee_id", employeeId);
     if (view) params.append("view", view);
+    if (search) params.append("search", search);
+    if (department) params.append("department", department);
+    if (status) params.append("status", status);
+    if (lateOnly) params.append("late_only", "true");
+    if (limit != null) params.append("limit", limit);
+    if (offset) params.append("offset", offset);
     const q = params.toString() ? `?${params.toString()}` : "";
     return this.get(`/api/admin/records${q}`);
   },
@@ -177,9 +182,13 @@ const ApiClient = {
   },
 
   // Authenticated CSV download — credential stays in the header, not the URL
-  async exportCsv(date) {
+  async exportCsv({ date = null, search = "", department = "", status = "", lateOnly = false } = {}) {
     const params = new URLSearchParams();
     if (date) params.append("date", date);
+    if (search) params.append("search", search);
+    if (department) params.append("department", department);
+    if (status) params.append("status", status);
+    if (lateOnly) params.append("late_only", "true");
     const query = params.toString() ? `?${params.toString()}` : "";
 
     const response = await fetch(`${API_BASE}/api/admin/export/csv${query}`, {
