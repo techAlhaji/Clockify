@@ -264,21 +264,6 @@ async function refreshShiftData() {
       handleSessionExpired();
     }
   }
-
-    // Show clock-skew warning if server time differs from device by more than 2 min
-    maybeShowSkewWarning(statusData.server_time || "");
-
-    updateActionControls();
-    updateTodaySummary();
-
-    const historyData = await ApiClient.getHistory(empId);
-    renderHistory(historyData);
-  } catch (err) {
-    console.error("Failed to refresh shift:", err);
-    if ((err.message || "").toLowerCase().includes("session")) {
-      handleSessionExpired();
-    }
-  }
 }
 
 // Update Action Button State
