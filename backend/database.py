@@ -177,6 +177,41 @@ def _create_tables(cursor):
             updated_at TEXT NOT NULL
         )""")
     cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS schedules (
+            id {id_col},
+            name TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            days_of_week TEXT NOT NULL DEFAULT '1,2,3,4,5',
+            grace_minutes INTEGER DEFAULT 5,
+            break_minutes INTEGER DEFAULT 60,
+            break_is_paid INTEGER DEFAULT 0,
+            required_minutes INTEGER DEFAULT 480,
+            is_overnight INTEGER DEFAULT 0,
+            overtime_threshold_daily_minutes INTEGER DEFAULT 480,
+            created_at TEXT NOT NULL
+        )""")
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS shift_assignments (
+            id {id_col},
+            employee_id INTEGER NOT NULL REFERENCES employees(id),
+            schedule_id INTEGER NOT NULL REFERENCES schedules(id),
+            site_id INTEGER,
+            effective_from TEXT NOT NULL,
+            effective_to TEXT,
+            created_at TEXT NOT NULL
+        )""")
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS holidays (
+            id {id_col},
+            date TEXT NOT NULL,
+            name TEXT NOT NULL,
+            scope TEXT NOT NULL DEFAULT 'company',
+            site_id INTEGER,
+            is_working_day INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        )""")
+    cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS attendance_records (
             id {id_col},
             employee_id INTEGER NOT NULL REFERENCES employees(id),
@@ -191,14 +226,76 @@ def _create_tables(cursor):
             clock_out_distance DOUBLE PRECISION,
             status TEXT NOT NULL,
             is_late INTEGER DEFAULT 0,
-            notes TEXT
+            notes TEXT,
+            started_at TEXT,
+            ended_at TEXT,
+            worked_minutes INTEGER DEFAULT 0,
+            break_minutes INTEGER DEFAULT 0,
+            overtime_minutes INTEGER DEFAULT 0,
+            schedule_id INTEGER REFERENCES schedules(id)
+        )""")
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS breaks (
+            id {id_col},
+            attendance_id INTEGER NOT NULL REFERENCES attendance_records(id),
+            break_start TEXT NOT NULL,
+            break_end TEXT,
+            break_minutes INTEGER DEFAULT 0,
+            is_paid INTEGER DEFAULT 0,
+            created_at TEXT NOT NULL
+        )""")
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS payroll_periods (
+            id {id_col},
+            name TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'OPEN',
+            approved_by TEXT,
+            approved_at TEXT,
+            locked_at TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL
         )""")
 
-    # Old SQLite files were created before the is_admin column existed: add it if missing.
+    _migrate_tables(cursor)
+
+
+def _migrate_tables(cursor):
+    """Ensure older databases are updated with newer schema columns."""
     if not IS_POSTGRES:
         cursor.execute("PRAGMA table_info(employees)")
-        if "is_admin" not in [col[1] for col in cursor.fetchall()]:
+        emp_cols = [col[1] for col in cursor.fetchall()]
+        if "is_admin" not in emp_cols:
             cursor.execute("ALTER TABLE employees ADD COLUMN is_admin INTEGER DEFAULT 0")
+
+        cursor.execute("PRAGMA table_info(attendance_records)")
+        att_cols = {col[1] for col in cursor.fetchall()}
+        columns_to_add = [
+            ("started_at", "TEXT"),
+            ("ended_at", "TEXT"),
+            ("worked_minutes", "INTEGER DEFAULT 0"),
+            ("break_minutes", "INTEGER DEFAULT 0"),
+            ("overtime_minutes", "INTEGER DEFAULT 0"),
+            ("schedule_id", "INTEGER"),
+        ]
+        for col_name, col_type in columns_to_add:
+            if col_name not in att_cols:
+                cursor.execute(f"ALTER TABLE attendance_records ADD COLUMN {col_name} {col_type}")
+    else:
+        columns_to_add = [
+            ("started_at", "TEXT"),
+            ("ended_at", "TEXT"),
+            ("worked_minutes", "INTEGER DEFAULT 0"),
+            ("break_minutes", "INTEGER DEFAULT 0"),
+            ("overtime_minutes", "INTEGER DEFAULT 0"),
+            ("schedule_id", "INTEGER"),
+        ]
+        for col_name, col_type in columns_to_add:
+            try:
+                cursor.execute(f"ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS {col_name} {col_type}")
+            except Exception:
+                pass
 
 
 def _seed(cursor):
@@ -235,6 +332,54 @@ def _seed(cursor):
         cursor.execute("SELECT COUNT(*) FROM employees WHERE staff_id = 'EMP010'")
         if cursor.fetchone()[0] == 0:
             cursor.execute(INSERT_EMPLOYEE, SEED_STAFF[-1] + (now,))
+
+    # 3. Schedules: seed starter shifts (Standard Day, Afternoon, Overnight)
+    cursor.execute("SELECT COUNT(*) FROM schedules")
+    if cursor.fetchone()[0] == 0:
+        default_schedules = [
+            ("Standard Day Shift", "09:00", "17:00", "1,2,3,4,5", 5, 60, 0, 420, 0, 480, now),
+            ("Afternoon Shift", "14:00", "22:00", "1,2,3,4,5", 5, 60, 0, 420, 0, 480, now),
+            ("Night Shift (Overnight)", "22:00", "06:00", "1,2,3,4,5", 5, 60, 0, 420, 1, 480, now),
+        ]
+        for s in default_schedules:
+            cursor.execute("""
+                INSERT INTO schedules (
+                    name, start_time, end_time, days_of_week, grace_minutes,
+                    break_minutes, break_is_paid, required_minutes, is_overnight,
+                    overtime_threshold_daily_minutes, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, s)
+
+    # 4. Shift assignments: ensure every employee has a historical assignment
+    cursor.execute("SELECT COUNT(*) FROM shift_assignments")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("SELECT id FROM schedules WHERE name = 'Standard Day Shift' LIMIT 1")
+        default_sched = cursor.fetchone()
+        sched_id = default_sched[0] if default_sched else 1
+        cursor.execute("SELECT id FROM employees")
+        all_emps = cursor.fetchall()
+        for emp in all_emps:
+            cursor.execute("""
+                INSERT INTO shift_assignments (
+                    employee_id, schedule_id, site_id, effective_from, effective_to, created_at
+                ) VALUES (?, ?, NULL, '2020-01-01', NULL, ?)
+            """, (emp[0], sched_id, now))
+
+    # 5. Seed standard public holidays
+    cursor.execute("SELECT COUNT(*) FROM holidays")
+    if cursor.fetchone()[0] == 0:
+        starter_holidays = [
+            ("2026-01-01", "New Year's Day", "company", None, 0, now),
+            ("2026-05-01", "Workers' Day", "company", None, 0, now),
+            ("2026-10-01", "Independence Day", "company", None, 0, now),
+            ("2026-12-25", "Christmas Day", "company", None, 0, now),
+            ("2026-12-26", "Boxing Day", "company", None, 0, now),
+        ]
+        for h in starter_holidays:
+            cursor.execute("""
+                INSERT INTO holidays (date, name, scope, site_id, is_working_day, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, h)
 
 
 # ---------------------------------------------------------------------------

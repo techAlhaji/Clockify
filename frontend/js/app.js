@@ -48,8 +48,12 @@ const elements = {
   actionBtnText:  document.getElementById('actionBtnText'),
 
   // Today Summary
-  todayClockIn:  document.getElementById('todayClockIn'),
-  todayClockOut: document.getElementById('todayClockOut'),
+  todayClockIn:     document.getElementById('todayClockIn'),
+  todayClockOut:    document.getElementById('todayClockOut'),
+  todayWorkedHours: document.getElementById('todayWorkedHours'),
+  todayWorkedNote:  document.getElementById('todayWorkedNote'),
+  todayShiftName:   document.getElementById('todayShiftName'),
+  todayShiftTimes:  document.getElementById('todayShiftTimes'),
 
   // History
   historyList:   document.getElementById('historyList'),
@@ -195,6 +199,7 @@ async function refreshShiftData() {
 
     AppState.shiftStatus = statusData.status;
     AppState.todayRecord = statusData.record;
+    AppState.shiftStatusData = statusData;
 
     if (statusData.status === "CLOCKED_IN" || statusData.status === "CLOCKED_OUT") {
       saveShiftLock(empId, statusData.status, statusData.record, today);
@@ -237,12 +242,36 @@ function updateActionControls() {
 
 // Update Today Summary Cards
 function updateTodaySummary() {
-  if (AppState.todayRecord) {
-    elements.todayClockIn.textContent = AppState.todayRecord.clock_in_time || "--:--";
-    elements.todayClockOut.textContent = AppState.todayRecord.clock_out_time || "--:--";
+  const statusData = AppState.shiftStatusData;
+  const rec = AppState.todayRecord;
+
+  if (rec) {
+    elements.todayClockIn.textContent = rec.clock_in_time || "--:--";
+    elements.todayClockOut.textContent = rec.clock_out_time || "--:--";
+    const workedDisplay = rec.worked_time_display || "0 h 0 m";
+    if (elements.todayWorkedHours) {
+      elements.todayWorkedHours.textContent = workedDisplay;
+    }
+    if (elements.todayWorkedNote) {
+      if (AppState.shiftStatus === "CLOCKED_OUT") {
+        elements.todayWorkedNote.textContent = `You worked ${workedDisplay} today`;
+      } else if (AppState.shiftStatus === "CLOCKED_IN") {
+        elements.todayWorkedNote.textContent = (statusData && statusData.worked_time_display) || "Shift in progress";
+      } else {
+        elements.todayWorkedNote.textContent = "You worked 0 h 0 m today";
+      }
+    }
   } else {
     elements.todayClockIn.textContent = "--:--";
     elements.todayClockOut.textContent = "--:--";
+    if (elements.todayWorkedHours) elements.todayWorkedHours.textContent = "0 h 0 m";
+    if (elements.todayWorkedNote) elements.todayWorkedNote.textContent = "You worked 0 h 0 m today";
+  }
+
+  if (statusData && statusData.schedule) {
+    const s = statusData.schedule;
+    if (elements.todayShiftName) elements.todayShiftName.textContent = s.name || "Standard Shift";
+    if (elements.todayShiftTimes) elements.todayShiftTimes.textContent = `${s.start || s.start_time} – ${s.end || s.end_time} (${s.grace_minutes || 5}m grace)`;
   }
 }
 

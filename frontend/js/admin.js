@@ -202,7 +202,10 @@ async function refreshAllDashboardData(silent = false) {
     await Promise.all([
       loadMetrics(metricsDate),
       loadGeofenceSettings(),
-      loadAttendanceRecords(recordsDate, viewParam)
+      loadAttendanceRecords(recordsDate, viewParam),
+      loadTimesheets(),
+      loadPayrollPeriods(),
+      loadSchedules()
     ]);
 
     // Visual pulse on live sync pill
@@ -672,6 +675,9 @@ function setupAdminListeners() {
       }
     });
   }
+
+  // Workforce Management controls (Timesheets, Payroll, Schedules)
+  bindWorkforceControls();
 }
 
 // Toast Notifications
@@ -689,6 +695,214 @@ function showToast(message, type = 'info') {
     toast.style.transition = 'all .35s cubic-bezier(.4,0,1,1)';
     setTimeout(() => toast.remove(), 360);
   }, 4500);
+}
+
+// ---------------------------------------------------------------------------
+// Workforce Management: Timesheets, Payroll and Schedules
+// ---------------------------------------------------------------------------
+
+let currentTimesheetPeriod = "daily";
+
+async function loadTimesheets() {
+  const tsBody = document.getElementById("timesheetTableBody");
+  const tsDate = document.getElementById("tsDateFilter")?.value || selectedFilterDate || getLocalDateString();
+  try {
+    const data = await ApiClient.getTimesheets(currentTimesheetPeriod, tsDate);
+    if (!data) return;
+
+    // Update KPIs
+    const s = data.summary || {};
+    const tsKpiWorked = document.getElementById("tsKpiWorked");
+    const tsKpiOvertime = document.getElementById("tsKpiOvertime");
+    const tsKpiAbsences = document.getElementById("tsKpiAbsences");
+    const tsKpiVerified = document.getElementById("tsKpiVerified");
+
+    if (tsKpiWorked) tsKpiWorked.textContent = s.total_worked_display || `${s.total_worked_hours || 0} h`;
+    if (tsKpiOvertime) tsKpiOvertime.textContent = `${s.total_overtime_hours || 0} h`;
+    if (tsKpiAbsences) tsKpiAbsences.textContent = s.total_absent_days ?? 0;
+    if (tsKpiVerified) tsKpiVerified.textContent = s.verified_presence_display || `${Math.round((s.verified_presence_minutes || 0) / 60)} h`;
+
+    if (!tsBody) return;
+    if (!data.employees || data.employees.length === 0) {
+      tsBody.innerHTML = `<tr><td colspan="10" style="text-align:center; padding: 20px;">No timesheet data available.</td></tr>`;
+      return;
+    }
+
+    tsBody.innerHTML = data.employees.map(e => `
+      <tr>
+        <td><strong>${esc(e.name)}</strong><br><span style="font-size:0.75rem; color:#64748b;">${esc(e.staff_id)}</span></td>
+        <td>${esc(e.department)}</td>
+        <td><span class="badge badge-neutral">${esc(e.schedule_name)}</span></td>
+        <td style="text-align:center;">${e.days_scheduled}</td>
+        <td style="text-align:center;">${e.days_worked}</td>
+        <td style="text-align:center;"><strong>${esc(e.worked_display)}</strong></td>
+        <td style="text-align:center;">${e.total_overtime_hours > 0 ? `<span style="color:#d97706; font-weight:600;">${e.total_overtime_hours} h</span>` : '0 h'}</td>
+        <td style="text-align:center;">${e.late_count > 0 ? `<span style="color:#dc2626; font-weight:600;">${e.late_count}</span>` : '0'}</td>
+        <td style="text-align:center;">${e.absence_count > 0 ? `<span style="color:#dc2626;">${e.absence_count}</span>` : '0'}</td>
+        <td style="text-align:center;"><span style="color:#16a34a;">${esc(e.verified_presence_display)}</span></td>
+      </tr>
+    `).join("");
+  } catch (err) {
+    if (tsBody) tsBody.innerHTML = `<tr><td colspan="10" style="text-align:center; color:#dc2626; padding: 20px;">Failed to load timesheet: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+async function loadPayrollPeriods() {
+  const body = document.getElementById("payrollPeriodsTableBody");
+  if (!body) return;
+  try {
+    const periods = await ApiClient.getPayrollPeriods();
+    if (!periods || periods.length === 0) {
+      body.innerHTML = `
+        <tr>
+          <td colspan="5" style="text-align:center; padding: 24px;">
+            <p>No pay periods registered yet.</p>
+            <button type="button" class="btn-primary" id="btnCreatePeriodNow" style="margin-top:8px;">Initialize Current Month Pay Period</button>
+          </td>
+        </tr>
+      `;
+      document.getElementById("btnCreatePeriodNow")?.addEventListener("click", async () => {
+        const today = new Date();
+        const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+        const end = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().slice(0, 10);
+        const monthName = today.toLocaleString("default", { month: "long", year: "numeric" });
+        await ApiClient.createPayrollPeriod({ name: `${monthName} Monthly Payroll`, start_date: start, end_date: end });
+        showToast(`Created pay period for ${monthName}`, "success");
+        await loadPayrollPeriods();
+      });
+      return;
+    }
+
+    body.innerHTML = periods.map(p => {
+      const isLocked = p.status === "LOCKED";
+      const isApproved = p.status === "APPROVED";
+      const statusBadge = isLocked
+        ? `<span class="badge" style="background:#fee2e2; color:#b91c1c; font-weight:bold;">🔒 LOCKED</span>`
+        : (isApproved
+          ? `<span class="badge" style="background:#fef3c7; color:#b45309; font-weight:bold;">✓ APPROVED</span>`
+          : `<span class="badge" style="background:#e0f2fe; color:#0369a1;">OPEN</span>`);
+
+      let actionBtns = "";
+      if (!isApproved && !isLocked) {
+        actionBtns += `<button type="button" class="btn-ghost btn-approve-period" data-id="${p.id}" style="margin-right:6px; font-size:0.8rem;">Approve</button>`;
+      }
+      if (!isLocked) {
+        actionBtns += `<button type="button" class="btn-primary btn-lock-period" data-id="${p.id}" style="font-size:0.8rem; background:#dc2626; border-color:#dc2626;">Lock Period</button>`;
+      } else {
+        actionBtns += `<span style="font-size:0.8rem; color:#64748b;">Figures Locked</span>`;
+      }
+
+      return `
+        <tr>
+          <td><strong>${esc(p.name)}</strong></td>
+          <td>${esc(p.start_date)} to ${esc(p.end_date)}</td>
+          <td>${statusBadge}</td>
+          <td style="font-size:0.8rem; color:#64748b;">${esc(p.approved_at ? `Approved: ${p.approved_at.slice(0,10)}` : 'Pending review')}</td>
+          <td>${actionBtns}</td>
+        </tr>
+      `;
+    }).join("");
+
+    body.querySelectorAll(".btn-approve-period").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.target.getAttribute("data-id");
+        await ApiClient.approvePayrollPeriod(id);
+        showToast("Pay period approved by management", "success");
+        await loadPayrollPeriods();
+      });
+    });
+
+    body.querySelectorAll(".btn-lock-period").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        const id = e.target.getAttribute("data-id");
+        if (confirm("Lock this pay period? No further attendance modifications will be allowed for this date range.")) {
+          await ApiClient.lockPayrollPeriod(id);
+          showToast("Pay period locked! Modifications prohibited.", "warning");
+          await loadPayrollPeriods();
+          await refreshAllDashboardData();
+        }
+      });
+    });
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="5" style="text-align:center; color:#dc2626;">Failed to load pay periods: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+async function loadSchedules() {
+  const body = document.getElementById("schedulesTableBody");
+  if (!body) return;
+  try {
+    const schedules = await ApiClient.getSchedules();
+    if (!schedules || schedules.length === 0) {
+      body.innerHTML = `<tr><td colspan="6" style="text-align:center;">No schedules found.</td></tr>`;
+      return;
+    }
+    body.innerHTML = schedules.map(s => `
+      <tr>
+        <td><strong>${esc(s.name)}</strong></td>
+        <td>${esc(s.start || s.start_time)} – ${esc(s.end || s.end_time)}</td>
+        <td>${esc(s.days_of_week === "1,2,3,4,5" ? "Mon – Fri" : s.days_of_week)}</td>
+        <td>${s.grace_minutes || 5} min grace</td>
+        <td>${s.break_minutes || 60} min (${s.break_is_paid ? 'Paid' : 'Unpaid'})</td>
+        <td>${s.is_overnight ? '<span style="color:#d97706; font-weight:bold;">Yes (Crosses midnight)</span>' : 'No'}</td>
+      </tr>
+    `).join("");
+  } catch (err) {
+    body.innerHTML = `<tr><td colspan="6" style="text-align:center; color:#dc2626;">Failed to load schedules: ${esc(err.message)}</td></tr>`;
+  }
+}
+
+function bindWorkforceControls() {
+  const btnDaily = document.getElementById("tsPeriodDaily");
+  const btnWeekly = document.getElementById("tsPeriodWeekly");
+  const btnMonthly = document.getElementById("tsPeriodMonthly");
+
+  function setTimesheetPeriod(p) {
+    currentTimesheetPeriod = p;
+    [btnDaily, btnWeekly, btnMonthly].forEach(b => {
+      if (!b) return;
+      b.classList.remove("btn-primary");
+      b.classList.add("btn-ghost");
+    });
+    if (p === "daily" && btnDaily) { btnDaily.classList.add("btn-primary"); btnDaily.classList.remove("btn-ghost"); }
+    if (p === "weekly" && btnWeekly) { btnWeekly.classList.add("btn-primary"); btnWeekly.classList.remove("btn-ghost"); }
+    if (p === "monthly" && btnMonthly) { btnMonthly.classList.add("btn-primary"); btnMonthly.classList.remove("btn-ghost"); }
+    loadTimesheets();
+  }
+
+  btnDaily?.addEventListener("click", () => setTimesheetPeriod("daily"));
+  btnWeekly?.addEventListener("click", () => setTimesheetPeriod("weekly"));
+  btnMonthly?.addEventListener("click", () => setTimesheetPeriod("monthly"));
+
+  document.getElementById("btnRefreshTimesheet")?.addEventListener("click", () => loadTimesheets());
+  document.getElementById("tsDateFilter")?.addEventListener("change", () => loadTimesheets());
+
+  // Payroll CSV & XLSX export buttons
+  document.getElementById("btnExportPayrollCsv")?.addEventListener("click", async () => {
+    try {
+      showToast("Generating payroll CSV export…", "info");
+      const today = new Date();
+      const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+      const end = getLocalDateString();
+      await ApiClient.exportPayroll(start, end, "csv");
+      showToast("Payroll CSV exported successfully.", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
+
+  document.getElementById("btnExportPayrollXlsx")?.addEventListener("click", async () => {
+    try {
+      showToast("Generating payroll Excel spreadsheet…", "info");
+      const today = new Date();
+      const start = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().slice(0, 10);
+      const end = getLocalDateString();
+      await ApiClient.exportPayroll(start, end, "xlsx");
+      showToast("Payroll Excel export downloaded.", "success");
+    } catch (err) {
+      showToast(err.message, "error");
+    }
+  });
 }
 
 document.addEventListener("DOMContentLoaded", initAdmin);

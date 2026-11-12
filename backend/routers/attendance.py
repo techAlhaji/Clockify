@@ -3,10 +3,18 @@ from typing import Optional
 
 from backend.database import get_db
 from backend.config import get_now, get_today_str, get_current_time_str
-from backend.schemas import ClockInRequest, ClockOutRequest
+from backend.schemas import ClockInRequest, ClockOutRequest, BreakCreate
 from backend.services.geofence import verify_geofence
 from backend.models import AttendanceModel
 from backend.routers.auth import require_employee
+from backend.services.schedules import (
+    get_employee_schedule_for_date,
+    is_working_day,
+    calculate_punctuality,
+    calculate_shift_duration,
+    is_period_locked,
+    format_minutes_to_hours_mins,
+)
 
 router = APIRouter(prefix="/api/attendance", tags=["Attendance"])
 
@@ -88,6 +96,16 @@ def clock_in(payload: ClockInRequest, employee_id: int = Depends(require_employe
 
     # 4. Check If Already Clocked In Today
     today_str = get_today_str()
+
+    # 4a. Check If Pay Period Is Locked
+    locked, lock_info = is_period_locked(cursor, today_str)
+    if locked:
+        conn.close()
+        raise HTTPException(
+            status_code=403,
+            detail=f"Attendance recording is blocked: pay period '{lock_info['name']}' is approved and locked by management."
+        )
+
     cursor.execute(
         """
         SELECT * FROM attendance_records
@@ -103,24 +121,20 @@ def clock_in(payload: ClockInRequest, employee_id: int = Depends(require_employe
             raise HTTPException(status_code=400, detail="You are already clocked in for today.")
         raise HTTPException(status_code=400, detail="Shift already completed for today.")
 
-    # 5. Determine Late Arrival (Evaluated in Local Workplace Timezone)
+    # 5. Determine Late Arrival against employee's schedule for today
     now = get_now()
     current_time_str = get_current_time_str()
-    start_time_str = geofence["work_start_time"] or "09:00"
-
-    try:
-        start_hour, start_minute = map(int, start_time_str.split(":")[:2])
-    except Exception:
-        start_hour, start_minute = (9, 0)
-    is_late = 1 if (now.hour, now.minute) > (start_hour, start_minute) else 0
+    started_at_iso = now.isoformat()
+    schedule = get_employee_schedule_for_date(cursor, employee_id, today_str)
+    is_late, late_mins, punctuality_note = calculate_punctuality(schedule, now, today_str)
 
     # 6. Insert Attendance Record
     cursor.execute(
         """
         INSERT INTO attendance_records (
             employee_id, date, clock_in_time, clock_in_lat, clock_in_lon,
-            clock_in_distance, status, is_late, notes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            clock_in_distance, status, is_late, notes, started_at, schedule_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             employee_id,
@@ -131,7 +145,9 @@ def clock_in(payload: ClockInRequest, employee_id: int = Depends(require_employe
             geo_check["distance_meters"],
             "CLOCKED_IN",
             is_late,
-            "Arrived within geofence perimeter",
+            f"Arrived within geofence perimeter. {punctuality_note}",
+            started_at_iso,
+            schedule.get("id"),
         ),
     )
     conn.commit()
@@ -139,9 +155,10 @@ def clock_in(payload: ClockInRequest, employee_id: int = Depends(require_employe
 
     cursor.execute(
         """
-        SELECT a.*, e.name, e.department, e.staff_id
+        SELECT a.*, e.name, e.department, e.staff_id, s.name AS schedule_name
         FROM attendance_records a
         JOIN employees e ON a.employee_id = e.id
+        LEFT JOIN schedules s ON a.schedule_id = s.id
         WHERE a.id = ?
         """,
         (new_record_id,),
@@ -154,6 +171,7 @@ def clock_in(payload: ClockInRequest, employee_id: int = Depends(require_employe
         "message": "Successfully clocked in! Arrival recorded.",
         "record": AttendanceModel.to_dict(created_record),
         "geofence": geo_check,
+        "schedule": schedule,
     }
 
 
@@ -186,6 +204,15 @@ def clock_out(payload: ClockOutRequest, employee_id: int = Depends(require_emplo
         conn.close()
         raise HTTPException(status_code=400, detail="You have already clocked out for today.")
 
+    # Check if target date is in a locked pay period
+    locked, lock_info = is_period_locked(cursor, record["date"])
+    if locked:
+        conn.close()
+        raise HTTPException(
+            status_code=403,
+            detail=f"Shift completion is blocked: pay period '{lock_info['name']}' is approved and locked by management."
+        )
+
     # 2. Retrieve Geofence for Distance Measurement
     geofence = _latest_geofence(cursor)
     if not geofence:
@@ -206,8 +233,20 @@ def clock_out(payload: ClockOutRequest, employee_id: int = Depends(require_emplo
         conn.close()
         _reject_location(geo_check)
 
-    # 3. Update Record with Clock Out Details
+    # 3. Calculate shift duration, breaks, and overtime
+    now = get_now()
     now_time = get_current_time_str()
+    ended_at_iso = now.isoformat()
+    schedule = get_employee_schedule_for_date(cursor, employee_id, record["date"])
+
+    # Fetch explicit breaks if any
+    cursor.execute("SELECT SUM(break_minutes) FROM breaks WHERE attendance_id = ? AND is_paid = 0", (record["id"],))
+    break_row = cursor.fetchone()
+    explicit_break = break_row[0] if break_row and break_row[0] else 0
+
+    started_val = record["started_at"] or f"{record['date']}T{record['clock_in_time']}"
+    duration_res = calculate_shift_duration(started_val, ended_at_iso, schedule, explicit_break)
+
     cursor.execute(
         """
         UPDATE attendance_records
@@ -215,18 +254,33 @@ def clock_out(payload: ClockOutRequest, employee_id: int = Depends(require_emplo
             clock_out_lat = ?,
             clock_out_lon = ?,
             clock_out_distance = ?,
-            status = 'CLOCKED_OUT'
+            status = 'CLOCKED_OUT',
+            ended_at = ?,
+            worked_minutes = ?,
+            break_minutes = ?,
+            overtime_minutes = ?
         WHERE id = ?
         """,
-        (now_time, payload.latitude, payload.longitude, geo_check["distance_meters"], record["id"]),
+        (
+            now_time,
+            payload.latitude,
+            payload.longitude,
+            geo_check["distance_meters"],
+            ended_at_iso,
+            duration_res["worked_minutes"],
+            duration_res["break_minutes"],
+            duration_res["overtime_minutes"],
+            record["id"],
+        ),
     )
     conn.commit()
 
     cursor.execute(
         """
-        SELECT a.*, e.name, e.department, e.staff_id
+        SELECT a.*, e.name, e.department, e.staff_id, s.name AS schedule_name
         FROM attendance_records a
         JOIN employees e ON a.employee_id = e.id
+        LEFT JOIN schedules s ON a.schedule_id = s.id
         WHERE a.id = ?
         """,
         (record["id"],),
@@ -236,9 +290,10 @@ def clock_out(payload: ClockOutRequest, employee_id: int = Depends(require_emplo
 
     return {
         "status": "success",
-        "message": "Successfully clocked out! Departure recorded.",
+        "message": f"Successfully clocked out! Departure recorded. {duration_res['worked_display']} worked.",
         "record": AttendanceModel.to_dict(updated_record),
         "geofence": geo_check,
+        "duration": duration_res,
     }
 
 
@@ -248,7 +303,7 @@ def get_daily_status(
     date: Optional[str] = Query(None),
     authenticated_employee_id: int = Depends(require_employee),
 ):
-    """Return clock-in status for the authenticated employee only."""
+    """Return clock-in status, worked hours, and schedule for the authenticated employee only."""
     if employee_id != authenticated_employee_id:
         raise HTTPException(status_code=403, detail="You may only view your own attendance status.")
 
@@ -258,9 +313,10 @@ def get_daily_status(
 
     cursor.execute(
         """
-        SELECT a.*, e.name, e.department, e.staff_id
+        SELECT a.*, e.name, e.department, e.staff_id, s.name AS schedule_name
         FROM attendance_records a
         JOIN employees e ON a.employee_id = e.id
+        LEFT JOIN schedules s ON a.schedule_id = s.id
         WHERE a.employee_id = ? AND a.date = ?
         ORDER BY a.id DESC
         LIMIT 1
@@ -268,15 +324,66 @@ def get_daily_status(
         (employee_id, query_date),
     )
     record = cursor.fetchone()
+
+    schedule = get_employee_schedule_for_date(cursor, employee_id, query_date)
+    is_work, work_reason = is_working_day(cursor, employee_id, query_date)
     conn.close()
 
-    if not record:
-        return {"status": "NOT_CLOCKED_IN", "date": query_date, "record": None}
+    worked_mins = 0
+    worked_display = "You worked 0 h 0 m today"
+
+    if record:
+        if record["status"] == "CLOCKED_OUT":
+            worked_mins = record["worked_minutes"] or 0
+            hours = worked_mins // 60
+            mins = worked_mins % 60
+            worked_display = f"You worked {hours} h {mins} m today"
+        elif record["status"] == "CLOCKED_IN":
+            started_val = record["started_at"] or f"{record['date']}T{record['clock_in_time']}"
+            cur_dur = calculate_shift_duration(started_val, get_now(), schedule, 0)
+            worked_mins = cur_dur["worked_minutes"]
+            hours = worked_mins // 60
+            mins = worked_mins % 60
+            worked_display = f"Shift in progress ({hours} h {mins} m worked so far)"
+
+        return {
+            "status": record["status"],
+            "date": query_date,
+            "record": AttendanceModel.to_dict(record),
+            "worked_minutes": worked_mins,
+            "worked_time_display": worked_display,
+            "schedule": {
+                "id": schedule.get("id"),
+                "name": schedule.get("name"),
+                "start": schedule.get("start_time"),
+                "start_time": schedule.get("start_time"),
+                "end": schedule.get("end_time"),
+                "end_time": schedule.get("end_time"),
+                "grace_minutes": schedule.get("grace_minutes"),
+                "break_minutes": schedule.get("break_minutes"),
+            },
+            "is_working_day": is_work,
+            "working_day_reason": work_reason,
+        }
 
     return {
-        "status": record["status"],
+        "status": "NOT_CLOCKED_IN",
         "date": query_date,
-        "record": AttendanceModel.to_dict(record),
+        "record": None,
+        "worked_minutes": 0,
+        "worked_time_display": "You worked 0 h 0 m today",
+        "schedule": {
+            "id": schedule.get("id"),
+            "name": schedule.get("name"),
+            "start": schedule.get("start_time"),
+            "start_time": schedule.get("start_time"),
+            "end": schedule.get("end_time"),
+            "end_time": schedule.get("end_time"),
+            "grace_minutes": schedule.get("grace_minutes"),
+            "break_minutes": schedule.get("break_minutes"),
+        },
+        "is_working_day": is_work,
+        "working_day_reason": work_reason,
     }
 
 
@@ -307,3 +414,36 @@ def get_employee_history(
     conn.close()
 
     return [AttendanceModel.to_dict(row) for row in rows]
+
+
+@router.post("/break")
+def record_break(
+    payload: BreakCreate,
+    employee_id: int = Depends(require_employee)
+):
+    """Explicitly record a break for today's active shift."""
+    conn = get_db()
+    cursor = conn.cursor()
+    today_str = get_today_str()
+
+    cursor.execute("""
+        SELECT * FROM attendance_records
+        WHERE employee_id = ? AND date = ?
+    """, (employee_id, today_str))
+    record = cursor.fetchone()
+    if not record:
+        conn.close()
+        raise HTTPException(status_code=400, detail="No active shift found for today. Clock in first.")
+
+    now_iso = get_now().isoformat()
+    cursor.execute("""
+        INSERT INTO breaks (attendance_id, break_start, break_minutes, is_paid, created_at)
+        VALUES (?, ?, ?, ?, ?)
+    """, (record["id"], now_iso, payload.break_minutes, payload.is_paid or 0, now_iso))
+    conn.commit()
+    conn.close()
+
+    return {
+        "status": "success",
+        "message": f"Recorded {payload.break_minutes} min break ({'paid' if payload.is_paid else 'unpaid'})."
+    }
