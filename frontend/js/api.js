@@ -176,6 +176,93 @@ const ApiClient = {
     return this.post("/api/admin/seed-demo-data", {});
   },
 
+  // Schedules & Shifts
+  getSchedules() {
+    return this.get("/api/admin/schedules");
+  },
+
+  createSchedule(payload) {
+    return this.post("/api/admin/schedules", payload);
+  },
+
+  updateSchedule(id, payload) {
+    return this.put(`/api/admin/schedules/${id}`, payload);
+  },
+
+  deleteSchedule(id) {
+    return this.delete ? this.delete(`/api/admin/schedules/${id}`) : fetch(`${API_BASE}/api/admin/schedules/${id}`, { method: "DELETE", headers: getAuthHeaders() }).then(r => r.json());
+  },
+
+  getShiftAssignments(employeeId) {
+    const q = employeeId ? `?employee_id=${employeeId}` : "";
+    return this.get(`/api/admin/shift-assignments${q}`);
+  },
+
+  createShiftAssignment(payload) {
+    return this.post("/api/admin/shift-assignments", payload);
+  },
+
+  getHolidays() {
+    return this.get("/api/admin/holidays");
+  },
+
+  createHoliday(payload) {
+    return this.post("/api/admin/holidays", payload);
+  },
+
+  // Timesheets (Daily, Weekly, Monthly)
+  getTimesheets(period = "daily", date = null, employeeId = null, department = null) {
+    const params = new URLSearchParams();
+    if (period) params.append("period", period);
+    if (date) params.append("date", date);
+    if (employeeId) params.append("employee_id", employeeId);
+    if (department) params.append("department", department);
+    return this.get(`/api/admin/timesheets?${params.toString()}`);
+  },
+
+  // Payroll Management & Export
+  getPayrollPeriods() {
+    return this.get("/api/admin/payroll/periods");
+  },
+
+  createPayrollPeriod(payload) {
+    return this.post("/api/admin/payroll/periods", payload);
+  },
+
+  approvePayrollPeriod(id) {
+    return this.post(`/api/admin/payroll/periods/${id}/approve`, {});
+  },
+
+  lockPayrollPeriod(id) {
+    return this.post(`/api/admin/payroll/periods/${id}/lock`, {});
+  },
+
+  async exportPayroll(startDate, endDate, format = "csv", periodId = null) {
+    const params = new URLSearchParams();
+    if (startDate) params.append("start_date", startDate);
+    if (endDate) params.append("end_date", endDate);
+    if (periodId) params.append("period_id", periodId);
+    params.append("format", format);
+
+    const response = await fetch(`${API_BASE}/api/admin/payroll/export?${params.toString()}`, {
+      headers: getAuthHeaders(),
+      cache: "no-store"
+    });
+    if (!response.ok) {
+      throw new Error("Payroll export failed. Please verify credentials.");
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `payroll_export_${startDate || "period"}.${format}`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+  },
+
   // Authenticated CSV download — credential stays in the header, not the URL
   async exportCsv(date) {
     const params = new URLSearchParams();

@@ -103,6 +103,20 @@
         Attendance Records
       </a>
 
+      <span class="side-nav-label">WORKFORCE</span>
+      <a href="#timesheets" class="side-nav-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        Timesheets & OT
+      </a>
+      <a href="#payroll" class="side-nav-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Payroll & Review
+      </a>
+      <a href="#schedules" class="side-nav-link">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Schedules & Shifts
+      </a>
+
       <span class="side-nav-label">SETTINGS</span>
       <a href="#geofence" class="side-nav-link">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -189,6 +203,134 @@
           </div>
           <div class="kpi-val" id="kpiAbsent">0</div>
           <p class="kpi-sub">No record today</p>
+        </div>
+      </section>
+
+      <!-- Timesheets & Overtime Section -->
+      <section class="tbl-section" id="timesheets" style="margin-top: 32px;">
+        <div class="tbl-title">
+          <div>
+            <h2>Workforce Timesheets & Overtime</h2>
+            <p class="tbl-sub" id="timesheetSub">Daily, weekly and monthly views with overtime calculation</p>
+          </div>
+        </div>
+
+        <div class="tbl-toolbar">
+          <div class="btn-group" role="group" aria-label="Timesheet Period">
+            <button type="button" class="btn-primary" id="tsPeriodDaily">Daily</button>
+            <button type="button" class="btn-ghost" id="tsPeriodWeekly">Weekly</button>
+            <button type="button" class="btn-ghost" id="tsPeriodMonthly">Monthly</button>
+          </div>
+          <input type="date" id="tsDateFilter" class="form-control table-filter" aria-label="Timesheet date">
+          <button type="button" class="btn-primary" id="btnRefreshTimesheet">Refresh Timesheet</button>
+        </div>
+
+        <!-- Timesheet KPI Summary -->
+        <div class="kpi-grid" style="margin: 16px 0;" aria-label="Timesheet KPIs">
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL WORKED</span>
+            <span class="kpi-val" id="tsKpiWorked">0 h</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL OVERTIME (1.5x)</span>
+            <span class="kpi-val" id="tsKpiOvertime">0 h</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">ABSENCES (EXCL. HOLIDAYS)</span>
+            <span class="kpi-val" id="tsKpiAbsences">0</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">VERIFIED PRESENCE</span>
+            <span class="kpi-val" id="tsKpiVerified">0 h</span>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="tbl-scroll">
+            <table class="attendance-table">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Department</th>
+                  <th>Shift Schedule</th>
+                  <th>Scheduled</th>
+                  <th>Worked</th>
+                  <th>Total Time</th>
+                  <th>Overtime</th>
+                  <th>Late Count</th>
+                  <th>Absence</th>
+                  <th>Verified GPS</th>
+                </tr>
+              </thead>
+              <tbody id="timesheetTableBody">
+                <tr><td colspan="10" style="text-align: center; padding: 24px;">Loading timesheet…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Payroll Review & Locked Periods Section -->
+      <section class="tbl-section" id="payroll" style="margin-top: 32px;">
+        <div class="tbl-title">
+          <div>
+            <h2>Payroll Review & Export</h2>
+            <p class="tbl-sub">Manager review: approve and lock pay periods to prevent further edits</p>
+          </div>
+        </div>
+
+        <div class="tbl-toolbar">
+          <button type="button" class="btn-primary" id="btnExportPayrollCsv">Download Payroll CSV</button>
+          <button type="button" class="btn-primary" id="btnExportPayrollXlsx">Download Payroll Excel (XLSX)</button>
+        </div>
+
+        <div class="table-card" style="margin-top: 16px;">
+          <div class="tbl-scroll">
+            <table class="attendance-table">
+              <thead>
+                <tr>
+                  <th>Pay Period Name</th>
+                  <th>Date Range</th>
+                  <th>Status</th>
+                  <th>Review Details</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="payrollPeriodsTableBody">
+                <tr><td colspan="5" style="text-align: center; padding: 24px;">Loading pay periods…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Schedules & Shift Assignments Section -->
+      <section class="tbl-section" id="schedules" style="margin-top: 32px;">
+        <div class="tbl-title">
+          <div>
+            <h2>Schedules & Shift Assignments</h2>
+            <p class="tbl-sub">Define per-employee shifts with start, end, grace periods and breaks</p>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="tbl-scroll">
+            <table class="attendance-table">
+              <thead>
+                <tr>
+                  <th>Shift Name</th>
+                  <th>Hours</th>
+                  <th>Working Days</th>
+                  <th>Grace Period</th>
+                  <th>Break</th>
+                  <th>Overnight</th>
+                </tr>
+              </thead>
+              <tbody id="schedulesTableBody">
+                <tr><td colspan="6" style="text-align: center; padding: 24px;">Loading schedules…</td></tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 
@@ -338,6 +480,134 @@
                     </div>
                   </td>
                 </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Timesheets & Overtime Section -->
+      <section class="tbl-section" id="timesheets" style="margin-top: 32px;">
+        <div class="tbl-title">
+          <div>
+            <h2>Workforce Timesheets & Overtime</h2>
+            <p class="tbl-sub" id="timesheetSub">Daily, weekly and monthly views with overtime calculation</p>
+          </div>
+        </div>
+
+        <div class="tbl-toolbar">
+          <div class="btn-group" role="group" aria-label="Timesheet Period">
+            <button type="button" class="btn-primary" id="tsPeriodDaily">Daily</button>
+            <button type="button" class="btn-ghost" id="tsPeriodWeekly">Weekly</button>
+            <button type="button" class="btn-ghost" id="tsPeriodMonthly">Monthly</button>
+          </div>
+          <input type="date" id="tsDateFilter" class="form-control table-filter" aria-label="Timesheet date">
+          <button type="button" class="btn-primary" id="btnRefreshTimesheet">Refresh Timesheet</button>
+        </div>
+
+        <!-- Timesheet KPI Summary -->
+        <div class="kpi-grid" style="margin: 16px 0;" aria-label="Timesheet KPIs">
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL WORKED</span>
+            <span class="kpi-val" id="tsKpiWorked">0 h</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">TOTAL OVERTIME (1.5x)</span>
+            <span class="kpi-val" id="tsKpiOvertime">0 h</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">ABSENCES (EXCL. HOLIDAYS)</span>
+            <span class="kpi-val" id="tsKpiAbsences">0</span>
+          </div>
+          <div class="kpi-card">
+            <span class="kpi-label">VERIFIED PRESENCE</span>
+            <span class="kpi-val" id="tsKpiVerified">0 h</span>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="tbl-scroll">
+            <table class="attendance-table">
+              <thead>
+                <tr>
+                  <th>Employee</th>
+                  <th>Department</th>
+                  <th>Shift Schedule</th>
+                  <th>Scheduled</th>
+                  <th>Worked</th>
+                  <th>Total Time</th>
+                  <th>Overtime</th>
+                  <th>Late Count</th>
+                  <th>Absence</th>
+                  <th>Verified GPS</th>
+                </tr>
+              </thead>
+              <tbody id="timesheetTableBody">
+                <tr><td colspan="10" style="text-align: center; padding: 24px;">Loading timesheet…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Payroll Review & Locked Periods Section -->
+      <section class="tbl-section" id="payroll" style="margin-top: 32px;">
+        <div class="tbl-title">
+          <div>
+            <h2>Payroll Review & Export</h2>
+            <p class="tbl-sub">Manager review: approve and lock pay periods to prevent further edits</p>
+          </div>
+        </div>
+
+        <div class="tbl-toolbar">
+          <button type="button" class="btn-primary" id="btnExportPayrollCsv">Download Payroll CSV</button>
+          <button type="button" class="btn-primary" id="btnExportPayrollXlsx">Download Payroll Excel (XLSX)</button>
+        </div>
+
+        <div class="table-card" style="margin-top: 16px;">
+          <div class="tbl-scroll">
+            <table class="attendance-table">
+              <thead>
+                <tr>
+                  <th>Pay Period Name</th>
+                  <th>Date Range</th>
+                  <th>Status</th>
+                  <th>Review Details</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="payrollPeriodsTableBody">
+                <tr><td colspan="5" style="text-align: center; padding: 24px;">Loading pay periods…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Schedules & Shift Assignments Section -->
+      <section class="tbl-section" id="schedules" style="margin-top: 32px;">
+        <div class="tbl-title">
+          <div>
+            <h2>Schedules & Shift Assignments</h2>
+            <p class="tbl-sub">Define per-employee shifts with start, end, grace periods and breaks</p>
+          </div>
+        </div>
+
+        <div class="table-card">
+          <div class="tbl-scroll">
+            <table class="attendance-table">
+              <thead>
+                <tr>
+                  <th>Shift Name</th>
+                  <th>Hours</th>
+                  <th>Working Days</th>
+                  <th>Grace Period</th>
+                  <th>Break</th>
+                  <th>Overnight</th>
+                </tr>
+              </thead>
+              <tbody id="schedulesTableBody">
+                <tr><td colspan="6" style="text-align: center; padding: 24px;">Loading schedules…</td></tr>
               </tbody>
             </table>
           </div>
